@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useRef, ChangeEvent } from 'react';
+import { useState, useRef, ChangeEvent, useEffect } from 'react';
 import { CreateAlertDto } from '@/types/alert';
+import { getCachedRoadName } from '@/lib/geocoding';
 import { 
   Car, 
   AlertTriangle, 
@@ -19,7 +20,9 @@ import {
   Navigation,
   Droplets,
   Flame,
-  Users
+  Users,
+  ChevronDown,
+  Loader2
 } from 'lucide-react';
 
 interface CreateAlertModalProps {
@@ -29,25 +32,36 @@ interface CreateAlertModalProps {
   userLocation: [number, number] | null;
 }
 
-const ALERT_TYPES = [
-  // Accident related
-  { value: 'accident', label: 'Accident', icon: Car, color: '#ef4444' },
-  { value: 'major_accident', label: 'Major accident', icon: AlertTriangle, color: '#dc2626' },
-  { value: 'road_blocked', label: 'Road blocked', icon: Ban, color: '#f97316' },
-  { value: 'road_closed', label: 'Road closed', icon: Ban, color: '#f97316' },
-  { value: 'construction', label: 'Construction', icon: Wrench, color: '#f59e0b' },
-  { value: 'road_works', label: 'Road works', icon: TrafficCone, color: '#f59e0b' },
-  { value: 'heavy_traffic', label: 'Heavy traffic', icon: Gauge, color: '#eab308' },
-  { value: 'traffic_jam', label: 'Traffic jam', icon: Gauge, color: '#eab308' },
-  // Other situations
-  { value: 'police_activity', label: 'Police activity', icon: Shield, color: '#3b82f6' },
-  { value: 'crime_reported', label: 'Crime reported', icon: AlertCircle, color: '#a855f7' },
-  { value: 'emergency_situation', label: 'Emergency situation', icon: AlertTriangle, color: '#ec4899' },
-  { value: 'hazard_on_road', label: 'Hazard on road', icon: Navigation, color: '#f97316' },
-  { value: 'flooded_road', label: 'Flooded road', icon: Droplets, color: '#3b82f6' },
-  { value: 'fire_on_road', label: 'Fire on road', icon: Flame, color: '#f97316' },
-  { value: 'protest_demonstration', label: 'Protest / demonstration', icon: Users, color: '#8b5cf6' },
-];
+// Alert types organized by category
+const ALERT_CATEGORIES = {
+  'Accidents & Emergencies': [
+    { value: 'accident', label: 'Accident', icon: Car, color: '#ef4444' },
+    { value: 'major_accident', label: 'Major accident', icon: AlertTriangle, color: '#dc2626' },
+    { value: 'emergency_situation', label: 'Emergency situation', icon: AlertTriangle, color: '#ec4899' },
+  ],
+  'Traffic & Road Conditions': [
+    { value: 'heavy_traffic', label: 'Heavy traffic', icon: Gauge, color: '#eab308' },
+    { value: 'traffic_jam', label: 'Traffic jam', icon: Gauge, color: '#eab308' },
+    { value: 'road_blocked', label: 'Road blocked', icon: Ban, color: '#f97316' },
+    { value: 'road_closed', label: 'Road closed', icon: Ban, color: '#f97316' },
+  ],
+  'Road Works & Construction': [
+    { value: 'construction', label: 'Construction', icon: Wrench, color: '#f59e0b' },
+    { value: 'road_works', label: 'Road works', icon: TrafficCone, color: '#f59e0b' },
+  ],
+  'Safety & Security': [
+    { value: 'police_activity', label: 'Police activity', icon: Shield, color: '#3b82f6' },
+    { value: 'crime_reported', label: 'Crime reported', icon: AlertCircle, color: '#a855f7' },
+    { value: 'protest_demonstration', label: 'Protest / demonstration', icon: Users, color: '#8b5cf6' },
+  ],
+  'Weather & Hazards': [
+    { value: 'hazard_on_road', label: 'Hazard on road', icon: Navigation, color: '#f97316' },
+    { value: 'flooded_road', label: 'Flooded road', icon: Droplets, color: '#3b82f6' },
+    { value: 'fire_on_road', label: 'Fire on road', icon: Flame, color: '#f97316' },
+  ],
+};
+
+const ALL_ALERT_TYPES = Object.values(ALERT_CATEGORIES).flat();
 
 export default function CreateAlertModal({
   isOpen,
@@ -59,9 +73,34 @@ export default function CreateAlertModal({
   const [description, setDescription] = useState('');
   const [photo, setPhoto] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<string>(Object.keys(ALERT_CATEGORIES)[0]);
+  const [isCategoryOpen, setIsCategoryOpen] = useState(false);
+  const [roadName, setRoadName] = useState<string>('');
+  const [fullAddress, setFullAddress] = useState<string>('');
+  const [isLoadingLocation, setIsLoadingLocation] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [cameraActive, setCameraActive] = useState(false);
+
+  // Fetch road name when user location changes
+  useEffect(() => {
+    if (userLocation) {
+      setIsLoadingLocation(true);
+      getCachedRoadName(userLocation[0], userLocation[1])
+        .then((result) => {
+          setRoadName(result.roadName);
+          setFullAddress(result.fullAddress);
+        })
+        .catch((error) => {
+          console.error('Error fetching road name:', error);
+          setRoadName('Location unavailable');
+          setFullAddress(`${userLocation[0].toFixed(5)}, ${userLocation[1].toFixed(5)}`);
+        })
+        .finally(() => {
+          setIsLoadingLocation(false);
+        });
+    }
+  }, [userLocation]);
 
   const handleImageChange = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -126,12 +165,16 @@ export default function CreateAlertModal({
         description: description || undefined,
         latitude: userLocation[0],
         longitude: userLocation[1],
+        roadName: roadName || undefined,
+        fullAddress: fullAddress || undefined,
         photo: photo || undefined,
       });
       // Reset form
       setType('accident');
       setDescription('');
       setPhoto(null);
+      setSelectedCategory(Object.keys(ALERT_CATEGORIES)[0]);
+      setIsCategoryOpen(false);
       stopCamera();
       onClose();
     } catch (err) {
@@ -174,13 +217,62 @@ export default function CreateAlertModal({
             <label className="block text-sm font-semibold text-gray-700 mb-3">
               Alert Type *
             </label>
+            
+            {/* Category Dropdown */}
+            <div className="relative mb-3">
+              <button
+                type="button"
+                onClick={() => setIsCategoryOpen(!isCategoryOpen)}
+                className="w-full px-4 py-3 bg-white border-2 border-gray-200 rounded-xl flex items-center justify-between hover:border-blue-500 transition-colors"
+              >
+                <span className="text-sm font-medium text-gray-700">{selectedCategory}</span>
+                <ChevronDown 
+                  size={20} 
+                  className={`text-gray-500 transition-transform ${isCategoryOpen ? 'rotate-180' : ''}`} 
+                />
+              </button>
+              
+              {isCategoryOpen && (
+                <>
+                  <div 
+                    className="fixed inset-0 z-10" 
+                    onClick={() => setIsCategoryOpen(false)}
+                  />
+                  <div className="absolute z-20 w-full mt-2 bg-white border-2 border-gray-200 rounded-xl shadow-xl max-h-60 overflow-y-auto">
+                    {Object.keys(ALERT_CATEGORIES).map((category) => (
+                      <button
+                        key={category}
+                        type="button"
+                        onClick={() => {
+                          setSelectedCategory(category);
+                          setIsCategoryOpen(false);
+                          // Set first alert type of the category as default
+                          const firstType = ALERT_CATEGORIES[category as keyof typeof ALERT_CATEGORIES][0];
+                          if (firstType) {
+                            setType(firstType.value);
+                          }
+                        }}
+                        className={`w-full px-4 py-3 text-left hover:bg-blue-50 transition-colors ${
+                          selectedCategory === category ? 'bg-blue-50 border-l-4 border-blue-500' : ''
+                        }`}
+                      >
+                        <span className="text-sm font-medium text-gray-700">{category}</span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Alert Types Grid for Selected Category */}
             <div className="grid grid-cols-2 gap-3 max-h-64 overflow-y-auto pr-2">
-              {ALERT_TYPES.map((alertType) => {
+              {ALERT_CATEGORIES[selectedCategory as keyof typeof ALERT_CATEGORIES]?.map((alertType) => {
                 const IconComponent = alertType.icon;
                 if (!IconComponent) return null;
                 return (
                   <button
                     key={alertType.value}
+                    type="button"
                     onClick={() => setType(alertType.value)}
                     className={`p-4 rounded-2xl border-2 transition-all ${
                       type === alertType.value
@@ -295,11 +387,27 @@ export default function CreateAlertModal({
           {/* Location Info */}
           {userLocation && (
             <div className="p-4 bg-gray-50 rounded-2xl">
-              <div className="flex items-center gap-2 text-sm text-gray-700">
-                <LocationIcon size={16} className="text-gray-600" />
-                <span className="text-gray-700">
-                  Location: {userLocation[0].toFixed(5)}, {userLocation[1].toFixed(5)}
-                </span>
+              <div className="flex items-start gap-2">
+                <LocationIcon size={16} className="text-gray-600 mt-0.5 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  {isLoadingLocation ? (
+                    <div className="flex items-center gap-2 text-sm text-gray-500">
+                      <Loader2 size={14} className="animate-spin" />
+                      <span>Getting location...</span>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="text-sm font-semibold text-gray-700 truncate">
+                        {roadName || 'Location unavailable'}
+                      </div>
+                      {fullAddress && fullAddress !== roadName && (
+                        <div className="text-xs text-gray-500 mt-1 truncate">
+                          {fullAddress}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
             </div>
           )}

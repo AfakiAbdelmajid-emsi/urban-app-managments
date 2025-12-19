@@ -262,6 +262,12 @@ export default function AlertMap({ alerts, onAlertClick, userLocation }: AlertMa
                   {selectedAlert.type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
                 </h3>
               </div>
+              {selectedAlert.roadName && (
+                <div className="flex items-center gap-1 mb-2 text-sm font-medium text-blue-600">
+                  <MapPin size={14} />
+                  <span className="truncate">{selectedAlert.roadName}</span>
+                </div>
+              )}
               {selectedAlert.description && (
                 <p className="text-sm text-gray-700 mb-2">{selectedAlert.description}</p>
               )}

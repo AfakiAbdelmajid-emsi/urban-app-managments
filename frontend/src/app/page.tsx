@@ -1,10 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { Alert } from '@/types/alert';
 import { api } from '@/lib/api';
 import { useSocket } from '@/hooks/useSocket';
+import { calculateDistance, formatDistance } from '@/lib/distance';
+import { getCachedRoadName } from '@/lib/geocoding';
 import CreateAlertModal from '@/components/CreateAlertModal';
 import AuthModal from '@/components/AuthModal';
 import BottomNav from '@/components/BottomNav';
@@ -60,15 +62,25 @@ export default function Home() {
   const [token, setToken] = useState<string | null>(null);
   const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
   const [activeTab, setActiveTab] = useState<'map' | 'create' | 'emergency' | 'ai' | 'profile'>('map');
+  const [distanceThreshold, setDistanceThreshold] = useState<number>(5); // Default 5km
   const { socket, connected } = useSocket(token);
 
-  // Load token from localStorage
+  // Load token and distance threshold from localStorage
   useEffect(() => {
     const savedToken = localStorage.getItem('token');
     if (savedToken) {
       setToken(savedToken);
     }
+    const savedDistance = localStorage.getItem('distanceThreshold');
+    if (savedDistance) {
+      setDistanceThreshold(Number(savedDistance));
+    }
   }, []);
+
+  // Save distance threshold to localStorage when it changes
+  useEffect(() => {
+    localStorage.setItem('distanceThreshold', distanceThreshold.toString());
+  }, [distanceThreshold]);
 
   // Check permission state and request location
   const requestLocation = async () => {
@@ -129,25 +141,86 @@ export default function Home() {
     requestLocation();
   }, []);
 
-  // Fetch initial alerts
+  // Fetch initial alerts and enrich with road names
   useEffect(() => {
-    api.getAllAlerts().then(setAlerts).catch(console.error);
+    const fetchAlerts = async () => {
+      try {
+        const fetchedAlerts = await api.getAllAlerts();
+        
+        // Enrich alerts with road names if they don't have them
+        const enrichedAlerts = await Promise.all(
+          fetchedAlerts.map(async (alert: Alert) => {
+            if (alert.roadName) {
+              return alert; // Already has road name
+            }
+            
+            try {
+              const geocodeResult = await getCachedRoadName(alert.latitude, alert.longitude);
+              return {
+                ...alert,
+                roadName: geocodeResult.roadName,
+                fullAddress: geocodeResult.fullAddress,
+              };
+            } catch (error) {
+              console.error('Error enriching alert with road name:', error);
+              return alert; // Return original alert if geocoding fails
+            }
+          })
+        );
+        
+        setAlerts(enrichedAlerts);
+      } catch (error) {
+        console.error('Error fetching alerts:', error);
+      }
+    };
+    
+    fetchAlerts();
   }, []);
+
+  // Filter alerts by distance from user location
+  const filteredAlerts = useMemo(() => {
+    if (!userLocation) return alerts;
+    
+    return alerts.filter((alert) => {
+      const distance = calculateDistance(
+        userLocation[0],
+        userLocation[1],
+        alert.latitude,
+        alert.longitude
+      );
+      return distance <= distanceThreshold;
+    });
+  }, [alerts, userLocation, distanceThreshold]);
 
   // Socket listeners
   useEffect(() => {
     if (!socket) return;
 
-    socket.on('alert_created', (newAlert: Alert) => {
+    socket.on('alert_created', async (newAlert: Alert) => {
+      // Enrich new alert with road name if it doesn't have one
+      let enrichedAlert = newAlert;
+      if (!newAlert.roadName) {
+        try {
+          const geocodeResult = await getCachedRoadName(newAlert.latitude, newAlert.longitude);
+          enrichedAlert = {
+            ...newAlert,
+            roadName: geocodeResult.roadName,
+            fullAddress: geocodeResult.fullAddress,
+          };
+        } catch (error) {
+          console.error('Error enriching new alert with road name:', error);
+        }
+      }
+      
       setAlerts((prev) => {
         // Check if alert already exists (might have been added by handleCreateAlert)
-        const exists = prev.some((a) => a._id === newAlert._id);
+        const exists = prev.some((a) => a._id === enrichedAlert._id);
         if (exists) {
           // Update existing alert (in case API response came first)
-          return prev.map((a) => (a._id === newAlert._id ? newAlert : a));
+          return prev.map((a) => (a._id === enrichedAlert._id ? enrichedAlert : a));
         }
         // Add new alert at the beginning
-        return [newAlert, ...prev];
+        return [enrichedAlert, ...prev];
       });
     });
 
@@ -199,17 +272,40 @@ export default function Home() {
     }
     try {
       const newAlert = await api.createAlert(token, alertData);
+      
+      // Enrich alert with road name if not already included
+      let enrichedAlert = newAlert;
+      if (!newAlert.roadName && alertData.roadName) {
+        enrichedAlert = {
+          ...newAlert,
+          roadName: alertData.roadName,
+          fullAddress: alertData.fullAddress,
+        };
+      } else if (!newAlert.roadName) {
+        // Fetch road name if not provided
+        try {
+          const geocodeResult = await getCachedRoadName(newAlert.latitude, newAlert.longitude);
+          enrichedAlert = {
+            ...newAlert,
+            roadName: geocodeResult.roadName,
+            fullAddress: geocodeResult.fullAddress,
+          };
+        } catch (error) {
+          console.error('Error enriching alert with road name:', error);
+        }
+      }
+      
       // Add the alert immediately to the creator's view
       // The WebSocket event will also fire, but we check for duplicates
       setAlerts((prev) => {
         // Check if alert already exists (from WebSocket event that might have arrived first)
-        const exists = prev.some((a) => a._id === newAlert._id);
+        const exists = prev.some((a) => a._id === enrichedAlert._id);
         if (exists) {
           // Update existing alert (in case WebSocket sent it first)
-          return prev.map((a) => (a._id === newAlert._id ? newAlert : a));
+          return prev.map((a) => (a._id === enrichedAlert._id ? enrichedAlert : a));
         }
         // Add new alert at the beginning
-        return [newAlert, ...prev];
+        return [enrichedAlert, ...prev];
       });
     } catch (error) {
       console.error('Failed to create alert:', error);
@@ -323,7 +419,7 @@ export default function Home() {
       {activeTab === 'map' && (
         <AlertMap
           key={userLocation ? `${userLocation[0]}-${userLocation[1]}` : 'no-location'}
-          alerts={alerts}
+          alerts={filteredAlerts}
           userLocation={userLocation}
           onAlertClick={setSelectedAlert}
         />
@@ -496,13 +592,36 @@ export default function Home() {
                 }}>
                   {getAlertIcon(selectedAlert.type)}
                 </div>
-                <div>
+                <div className="flex-1 min-w-0">
                   <h3 className="text-xl font-bold text-gray-700">
                     {selectedAlert.type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
                   </h3>
-                  <p className="text-sm text-gray-500">
-                    {new Date(selectedAlert.createdAt).toLocaleString()}
-                  </p>
+                  <div className="flex flex-col gap-1 mt-1">
+                    {selectedAlert.roadName && (
+                      <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                        <MapPin size={14} className="text-blue-600 flex-shrink-0" />
+                        <span className="truncate">{selectedAlert.roadName}</span>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <p className="text-xs text-gray-500">
+                        {new Date(selectedAlert.createdAt).toLocaleString()}
+                      </p>
+                      {userLocation && (
+                        <span className="text-xs font-medium text-blue-600 flex items-center gap-1">
+                          <span>📍</span>
+                          {formatDistance(
+                            calculateDistance(
+                              userLocation[0],
+                              userLocation[1],
+                              selectedAlert.latitude,
+                              selectedAlert.longitude
+                            )
+                          )}
+                        </span>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
               <button
@@ -580,11 +699,33 @@ export default function Home() {
       )}
 
       {/* Alert Count Badge - Only on map */}
-      {activeTab === 'map' && (
+      {activeTab === 'map' && userLocation && (
         <div className="absolute top-20 left-4 z-10 bg-white/90 backdrop-blur-md rounded-full px-4 py-2 shadow-lg">
           <span className="text-sm font-semibold text-gray-700">
-            {alerts.length} active alerts
+            {filteredAlerts.length} alerts within {distanceThreshold}km
           </span>
+        </div>
+      )}
+
+      {/* Distance Filter Control - Only on map */}
+      {activeTab === 'map' && userLocation && (
+        <div className="absolute top-20 right-4 z-10 bg-white/90 backdrop-blur-md rounded-2xl p-3 shadow-lg max-w-[200px]">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-gray-700">Distance Filter</span>
+            <span className="text-xs text-gray-500">{distanceThreshold}km</span>
+          </div>
+          <input
+            type="range"
+            min="1"
+            max="20"
+            value={distanceThreshold}
+            onChange={(e) => setDistanceThreshold(Number(e.target.value))}
+            className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-500"
+          />
+          <div className="flex justify-between text-xs text-gray-500 mt-1">
+            <span>1km</span>
+            <span>20km</span>
+          </div>
         </div>
       )}
 

@@ -5,6 +5,8 @@ export interface Alert {
   description?: string;
   latitude: number;
   longitude: number;
+  roadName?: string;
+  fullAddress?: string;
   photo?: string;
   confirmations: number;
   denials: number;
@@ -17,6 +19,8 @@ export interface CreateAlertDto {
   description?: string;
   latitude: number;
   longitude: number;
+  roadName?: string;
+  fullAddress?: string;
   photo?: string;
 }
 

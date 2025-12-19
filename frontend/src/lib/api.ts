@@ -48,7 +48,7 @@ export const api = {
   },
 
   async confirmAlert(token: string, id: string) {
-    const res = await fetch(`${API_URL}/alerts/${id}/confirm`, {
+    const res = await fetch(`/api/alerts/${id}/confirm`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}` },
     });
@@ -89,6 +89,29 @@ export const api = {
       throw new Error(error.message || 'Failed to get AI response');
     }
     return res.json();
+  },
+
+  // User endpoints
+  async getUserProfile(token: string, userId: string) {
+    const res = await fetch(`/api/users/${userId}`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+    if (!res.ok) throw new Error('Failed to fetch user profile');
+    return res.json();
+  },
+
+  async getUserAlerts(token: string, userId: string) {
+    // Get all alerts and filter by userId
+    const res = await fetch('/api/alerts', {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+    if (!res.ok) throw new Error('Failed to fetch user alerts');
+    const allAlerts = await res.json();
+    return allAlerts.filter((alert: any) => alert.userId === userId);
   },
 };
 
