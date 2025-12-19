@@ -1,0 +1,147 @@
+@import "tailwindcss";
+@import "mapbox-gl/dist/mapbox-gl.css";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Animations */
+@keyframes slide-up {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.3s ease-out;
+}
+
+/* Custom popup styling for mapbox */
+.mapboxgl-popup-content {
+  padding: 0 !important;
+  border-radius: 1rem !important;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3) !important;
+}
+
+.mapboxgl-popup-close-button {
+  font-size: 24px !important;
+  padding: 8px !important;
+  color: #374151 !important;
+}
+
+.mapboxgl-popup-close-button:hover {
+  background-color: #f3f4f6 !important;
+  border-radius: 50% !important;
+}
+
+/* Hide scrollbar but keep functionality */
+.overflow-y-auto::-webkit-scrollbar {
+  width: 6px;
+}
+
+.overflow-y-auto::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.overflow-y-auto::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+
+.overflow-y-auto::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+/* Hide scrollbar for horizontal scroll */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Safe area support for mobile devices */
+.safe-area-inset-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Curved notch for bottom navigation */
+.bottom-nav-with-notch {
+  position: relative;
+  overflow: visible;
+}
+
+.bottom-nav-with-notch::before {
+  content: '';
+  position: absolute;
+  top: -40px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 80px;
+  height: 40px;
+  background: white;
+  border-radius: 0 0 40px 40px;
+  z-index: 1;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+/* Mobile-first bottom nav spacing */
+@media (max-width: 768px) {
+  body {
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+}
+
+/* Ensure all inputs and placeholders are visible with gray text */
+input,
+textarea {
+  color: #374151 !important; /* text-gray-700 */
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #6b7280 !important; /* text-gray-500 */
+  opacity: 1 !important;
+}
+
+/* Ensure modal titles and labels are gray */
+.bg-white h2,
+.bg-white label {
+  color: #374151 !important; /* text-gray-700 */
+}
+
+/* Ensure close buttons are visible */
+button[aria-label*="close"],
+button[aria-label*="Close"],
+button:has(svg[class*="X"]),
+button:has(span:contains("×")) {
+  color: #374151 !important; /* text-gray-700 */
+}

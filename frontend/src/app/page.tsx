@@ -1,0 +1,635 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
+import { Alert } from '@/types/alert';
+import { api } from '@/lib/api';
+import { useSocket } from '@/hooks/useSocket';
+import CreateAlertModal from '@/components/CreateAlertModal';
+import AuthModal from '@/components/AuthModal';
+import BottomNav from '@/components/BottomNav';
+import AIPage from '@/components/AIPage';
+import ProfilePage from '@/components/ProfilePage';
+import EmergencyPage from '@/components/EmergencyPage';
+import { 
+  AlertCircle, 
+  MapPin, 
+  CheckCircle, 
+  Loader2, 
+  RefreshCw, 
+  X, 
+  Car, 
+  Flame, 
+  Droplets,
+  AlertTriangle, 
+  Hospital, 
+  MapPin as MapPinIcon,
+  ThumbsUp,
+  ThumbsDown,
+  Target,
+  Plus,
+  LogIn,
+  LogOut,
+  Ban,
+  Wrench,
+  TrafficCone,
+  Gauge,
+  Shield,
+  Navigation,
+  Users
+} from 'lucide-react';
+
+// Dynamic import to avoid SSR issues with map
+const AlertMap = dynamic(() => import('@/components/AlertMap'), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-full flex items-center justify-center bg-gray-900">
+      <div className="text-white text-lg">Loading map...</div>
+    </div>
+  ),
+});
+
+export default function Home() {
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
+  const [locationStatus, setLocationStatus] = useState<'loading' | 'granted' | 'denied' | 'unavailable'>('loading');
+  const [showLocationBadge, setShowLocationBadge] = useState(false);
+  const [isRequestingLocation, setIsRequestingLocation] = useState(false);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [token, setToken] = useState<string | null>(null);
+  const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
+  const [activeTab, setActiveTab] = useState<'map' | 'create' | 'emergency' | 'ai' | 'profile'>('map');
+  const { socket, connected } = useSocket(token);
+
+  // Load token from localStorage
+  useEffect(() => {
+    const savedToken = localStorage.getItem('token');
+    if (savedToken) {
+      setToken(savedToken);
+    }
+  }, []);
+
+  // Check permission state and request location
+  const requestLocation = async () => {
+    if (isRequestingLocation) return; // Prevent multiple requests
+    
+    setIsRequestingLocation(true);
+    setLocationStatus('loading');
+    
+    // Check if Permissions API is available
+    if (navigator.permissions) {
+      try {
+        const permissionStatus = await navigator.permissions.query({ name: 'geolocation' as PermissionName });
+        console.log('📍 Location permission state:', permissionStatus.state);
+        
+        if (permissionStatus.state === 'denied') {
+          setLocationStatus('denied');
+          setIsRequestingLocation(false);
+          return;
+        }
+      } catch (error) {
+        console.log('Permissions API not fully supported, continuing...');
+      }
+    }
+    
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          setUserLocation([position.coords.latitude, position.coords.longitude]);
+          setLocationStatus('granted');
+          setShowLocationBadge(true);
+          setIsRequestingLocation(false);
+          console.log('✅ Location granted:', position.coords.latitude, position.coords.longitude);
+          
+          // Auto-hide badge after 5 seconds
+          setTimeout(() => {
+            setShowLocationBadge(false);
+          }, 5000);
+        },
+        (error) => {
+          console.error('❌ Location error:', error.message, error.code);
+          setLocationStatus('denied');
+          setIsRequestingLocation(false);
+          // Don't set a default location - let user decide
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0,
+        }
+      );
+    } else {
+      setLocationStatus('unavailable');
+      setIsRequestingLocation(false);
+    }
+  };
+
+  useEffect(() => {
+    requestLocation();
+  }, []);
+
+  // Fetch initial alerts
+  useEffect(() => {
+    api.getAllAlerts().then(setAlerts).catch(console.error);
+  }, []);
+
+  // Socket listeners
+  useEffect(() => {
+    if (!socket) return;
+
+    socket.on('alert_created', (newAlert: Alert) => {
+      setAlerts((prev) => {
+        // Check if alert already exists (might have been added by handleCreateAlert)
+        const exists = prev.some((a) => a._id === newAlert._id);
+        if (exists) {
+          // Update existing alert (in case API response came first)
+          return prev.map((a) => (a._id === newAlert._id ? newAlert : a));
+        }
+        // Add new alert at the beginning
+        return [newAlert, ...prev];
+      });
+    });
+
+    socket.on('alert_confirmed', (updatedAlert: Alert) => {
+      setAlerts((prev) =>
+        prev.map((a) => (a._id === updatedAlert._id ? updatedAlert : a))
+      );
+    });
+
+    socket.on('alert_denied', (updatedAlert: Alert) => {
+      setAlerts((prev) =>
+        prev.map((a) => (a._id === updatedAlert._id ? updatedAlert : a))
+      );
+    });
+
+    socket.on('alert_deleted', ({ id }: { id: string }) => {
+      setAlerts((prev) => prev.filter((a) => a._id !== id));
+    });
+
+    return () => {
+      socket.off('alert_created');
+      socket.off('alert_confirmed');
+      socket.off('alert_denied');
+      socket.off('alert_deleted');
+    };
+  }, [socket]);
+
+  const handleLogin = async (email: string, password: string) => {
+    const data = await api.login(email, password);
+    setToken(data.access_token);
+    localStorage.setItem('token', data.access_token);
+  };
+
+  const handleRegister = async (email: string, password: string, username: string) => {
+    const data = await api.register(email, password, username);
+    setToken(data.access_token);
+    localStorage.setItem('token', data.access_token);
+  };
+
+  const handleLogout = () => {
+    setToken(null);
+    localStorage.removeItem('token');
+  };
+
+  const handleCreateAlert = async (alertData: any) => {
+    if (!token) {
+      setIsAuthModalOpen(true);
+      return;
+    }
+    try {
+      const newAlert = await api.createAlert(token, alertData);
+      // Add the alert immediately to the creator's view
+      // The WebSocket event will also fire, but we check for duplicates
+      setAlerts((prev) => {
+        // Check if alert already exists (from WebSocket event that might have arrived first)
+        const exists = prev.some((a) => a._id === newAlert._id);
+        if (exists) {
+          // Update existing alert (in case WebSocket sent it first)
+          return prev.map((a) => (a._id === newAlert._id ? newAlert : a));
+        }
+        // Add new alert at the beginning
+        return [newAlert, ...prev];
+      });
+    } catch (error) {
+      console.error('Failed to create alert:', error);
+      throw error;
+    }
+  };
+
+  const handleConfirmAlert = async (id: string) => {
+    if (!token) {
+      setIsAuthModalOpen(true);
+      return;
+    }
+    await api.confirmAlert(token, id);
+  };
+
+  const handleDenyAlert = async (id: string) => {
+    if (!token) {
+      setIsAuthModalOpen(true);
+      return;
+    }
+    await api.denyAlert(token, id);
+  };
+
+  // Detect browser for specific instructions
+  const getBrowserName = () => {
+    const userAgent = navigator.userAgent.toLowerCase();
+    if (userAgent.includes('chrome') && !userAgent.includes('edge')) return 'Chrome';
+    if (userAgent.includes('firefox')) return 'Firefox';
+    if (userAgent.includes('safari') && !userAgent.includes('chrome')) return 'Safari';
+    if (userAgent.includes('edge')) return 'Edge';
+    return 'your browser';
+  };
+
+  const getAlertColor = (type: string) => {
+    const colors: Record<string, string> = {
+      // Accident related
+      accident: '#ef4444',
+      major_accident: '#dc2626',
+      road_blocked: '#f97316',
+      road_closed: '#f97316',
+      construction: '#f59e0b',
+      road_works: '#f59e0b',
+      heavy_traffic: '#eab308',
+      traffic_jam: '#eab308',
+      // Other situations
+      police_activity: '#3b82f6',
+      crime_reported: '#a855f7',
+      emergency_situation: '#ec4899',
+      hazard_on_road: '#f97316',
+      flooded_road: '#3b82f6',
+      fire_on_road: '#f97316',
+      protest_demonstration: '#8b5cf6',
+      // Legacy types
+      fire: '#f97316',
+      flood: '#3b82f6',
+      crime: '#a855f7',
+      medical: '#ec4899',
+      other: '#6b7280',
+    };
+    return colors[type.toLowerCase()] || '#6b7280';
+  };
+
+  const getAlertIcon = (type: string) => {
+    const iconProps = { size: 32, className: 'text-white' };
+    const typeLower = type.toLowerCase();
+    
+    switch (typeLower) {
+      // Accident related
+      case 'accident':
+        return <Car {...iconProps} />;
+      case 'major_accident':
+        return <AlertTriangle {...iconProps} />;
+      case 'road_blocked':
+      case 'road_closed':
+        return <Ban {...iconProps} />;
+      case 'construction':
+        return <Wrench {...iconProps} />;
+      case 'road_works':
+        return <TrafficCone {...iconProps} />;
+      case 'heavy_traffic':
+      case 'traffic_jam':
+        return <Gauge {...iconProps} />;
+      // Other situations
+      case 'police_activity':
+        return <Shield {...iconProps} />;
+      case 'crime_reported':
+      case 'crime':
+        return <AlertCircle {...iconProps} />;
+      case 'emergency_situation':
+        return <AlertTriangle {...iconProps} />;
+      case 'hazard_on_road':
+        return <Navigation {...iconProps} />;
+      case 'flooded_road':
+      case 'flood':
+        return <Droplets {...iconProps} />;
+      case 'fire_on_road':
+      case 'fire':
+        return <Flame {...iconProps} />;
+      case 'protest_demonstration':
+        return <Users {...iconProps} />;
+      case 'medical':
+        return <Hospital {...iconProps} />;
+      default:
+        return <MapPinIcon {...iconProps} />;
+    }
+  };
+
+  return (
+    <div className="relative w-screen h-screen overflow-hidden pb-16">
+      {/* Conditional Content Based on Active Tab */}
+      {activeTab === 'map' && (
+        <AlertMap
+          key={userLocation ? `${userLocation[0]}-${userLocation[1]}` : 'no-location'}
+          alerts={alerts}
+          userLocation={userLocation}
+          onAlertClick={setSelectedAlert}
+        />
+      )}
+      
+      {activeTab === 'ai' && (
+        <div className="absolute inset-0 bg-white">
+          <AIPage token={token} onLogin={() => setIsAuthModalOpen(true)} />
+        </div>
+      )}
+      
+      {activeTab === 'profile' && (
+        <div className="absolute inset-0 bg-white overflow-y-auto">
+          <ProfilePage 
+            token={token} 
+            onLogout={handleLogout}
+            onLogin={() => setIsAuthModalOpen(true)}
+          />
+        </div>
+      )}
+      
+      {activeTab === 'emergency' && (
+        <div className="absolute inset-0 bg-white overflow-y-auto">
+          <EmergencyPage />
+        </div>
+      )}
+
+      {/* Map-specific content */}
+      {activeTab === 'map' && (
+        <>
+
+      {/* Header */}
+      <div className="absolute top-0 left-0 right-0 z-10 bg-gradient-to-b from-black/50 to-transparent p-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center text-white shadow-lg">
+              <AlertCircle size={24} />
+            </div>
+            <div>
+              <h1 className="text-white font-bold text-lg leading-tight">Alert Map</h1>
+              <div className="flex items-center gap-2 text-xs text-white/80">
+                <span className={`w-2 h-2 rounded-full ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
+                {connected ? 'Connected' : 'Disconnected'}
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={() => (token ? handleLogout() : setIsAuthModalOpen(true))}
+            className="px-4 py-2 bg-white/20 backdrop-blur-md text-white rounded-full text-sm font-medium hover:bg-white/30 transition-colors flex items-center gap-2"
+          >
+            {token ? (
+              <>
+                <LogOut size={16} />
+                <span>Sign Out</span>
+              </>
+            ) : (
+              <>
+                <LogIn size={16} />
+                <span>Sign In</span>
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Location Status Overlay */}
+      {locationStatus === 'loading' && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl p-8 max-w-sm mx-4 text-center shadow-2xl">
+            <div className="flex justify-center mb-4 animate-pulse">
+              <MapPin size={64} className="text-blue-500" />
+            </div>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Finding Your Location</h2>
+            <p className="text-gray-600 mb-4">
+              Please allow location access to see alerts near you
+            </p>
+            <div className="flex items-center justify-center gap-2">
+              <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+              <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+              <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Location Denied Banner */}
+      {locationStatus === 'denied' && (
+        <div className="absolute top-20 left-4 right-4 z-20 bg-orange-500 rounded-2xl p-5 shadow-xl animate-slide-up max-w-md">
+          <div className="flex items-start gap-3">
+            <MapPin size={32} className="text-white flex-shrink-0 mt-1" />
+            <div className="flex-1">
+              <h3 className="text-white font-bold text-lg mb-2">Location Access Needed</h3>
+              <p className="text-white/90 text-sm mb-3">
+                To create alerts and see your position, please enable location access in your browser:
+              </p>
+              
+              {/* Instructions */}
+              <div className="bg-white/10 rounded-xl p-3 mb-3 text-white/90 text-xs space-y-2">
+                <p className="font-semibold mb-2">How to enable in {getBrowserName()}:</p>
+                <div className="flex items-start gap-2">
+                  <span className="font-bold min-w-[20px]">1.</span>
+                  <span>Click the 🔒 lock icon next to the URL</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="font-bold min-w-[20px]">2.</span>
+                  <span>Find "Location" and select "Allow"</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="font-bold min-w-[20px]">3.</span>
+                  <span>Refresh the page or click "Try Again"</span>
+                </div>
+              </div>
+
+              <button
+                onClick={(e) => {
+                  e.preventDefault();
+                  requestLocation();
+                }}
+                disabled={isRequestingLocation}
+                className={`w-full px-4 py-3 bg-white text-orange-500 font-semibold rounded-xl text-sm shadow-lg transition-colors ${
+                  isRequestingLocation ? 'opacity-70 cursor-not-allowed' : 'hover:bg-orange-50'
+                }`}
+              >
+                <div className="flex items-center justify-center gap-2">
+                  {isRequestingLocation ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" />
+                      <span>Checking...</span>
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw size={16} />
+                      <span>Try Again</span>
+                    </>
+                  )}
+                </div>
+              </button>
+            </div>
+            <button
+              onClick={() => setLocationStatus('unavailable')}
+              className="text-white/90 hover:text-white"
+            >
+              <X size={24} className="text-white" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Location Granted Badge */}
+      {showLocationBadge && locationStatus === 'granted' && userLocation && (
+        <div className="absolute top-20 left-4 z-20 bg-green-500/90 backdrop-blur-md rounded-full px-4 py-2 shadow-lg animate-slide-up">
+          <div className="flex items-center gap-2">
+            <CheckCircle size={16} className="text-white" />
+            <span className="text-white text-sm font-medium">
+              Location detected
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Alert Details Bottom Sheet */}
+      {selectedAlert && (
+        <div className="absolute bottom-0 left-0 right-0 z-20 bg-white rounded-t-3xl shadow-2xl animate-slide-up">
+          <div className="p-6">
+            <div className="w-12 h-1 bg-gray-300 rounded-full mx-auto mb-4" />
+            <div className="flex items-start justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-full flex items-center justify-center" style={{ 
+                  backgroundColor: getAlertColor(selectedAlert.type)
+                }}>
+                  {getAlertIcon(selectedAlert.type)}
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-gray-700">
+                    {selectedAlert.type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                  </h3>
+                  <p className="text-sm text-gray-500">
+                    {new Date(selectedAlert.createdAt).toLocaleString()}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedAlert(null)}
+                className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-700"
+              >
+                <X size={20} className="text-gray-700" />
+              </button>
+            </div>
+
+            {selectedAlert.description && (
+              <p className="text-gray-700 mb-4">{selectedAlert.description}</p>
+            )}
+
+            {selectedAlert.photo && (
+              <img
+                src={selectedAlert.photo}
+                alt="Alert"
+                className="w-full h-48 object-cover rounded-2xl mb-4"
+              />
+            )}
+
+            <div className="flex gap-3 mb-4">
+              <button
+                onClick={() => handleConfirmAlert(selectedAlert._id)}
+                className="flex-1 py-3 bg-green-500 text-white font-semibold rounded-2xl hover:bg-green-600 transition-colors flex items-center justify-center gap-2"
+              >
+                <ThumbsUp size={20} />
+                <span>Confirm ({selectedAlert.confirmations})</span>
+              </button>
+              <button
+                onClick={() => handleDenyAlert(selectedAlert._id)}
+                className="flex-1 py-3 bg-red-500 text-white font-semibold rounded-2xl hover:bg-red-600 transition-colors flex items-center justify-center gap-2"
+              >
+                <ThumbsDown size={20} />
+                <span>Deny ({selectedAlert.denials})</span>
+              </button>
+            </div>
+
+            <div className="p-3 bg-gray-50 rounded-2xl text-sm">
+              <div className="flex items-center gap-2 text-gray-700">
+                <MapPin size={16} className="text-gray-600" />
+                <span className="text-gray-700">
+                  {selectedAlert.latitude.toFixed(5)}, {selectedAlert.longitude.toFixed(5)}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Location Button - Above bottom nav */}
+      {activeTab === 'map' && (
+        <div className="absolute bottom-24 right-6 z-10">
+          <button
+            onClick={(e) => {
+              e.preventDefault();
+              requestLocation();
+            }}
+            disabled={isRequestingLocation}
+            className={`w-14 h-14 bg-white rounded-full shadow-xl flex items-center justify-center transition-transform ${
+              isRequestingLocation ? 'animate-pulse' : 'hover:scale-110 active:scale-95'
+            }`}
+            title="Get my location"
+          >
+            {isRequestingLocation ? (
+              <Loader2 size={24} className="text-blue-500 animate-spin" />
+            ) : (
+              <Target size={24} className="text-blue-500" />
+            )}
+          </button>
+        </div>
+      )}
+        </>
+      )}
+
+      {/* Alert Count Badge - Only on map */}
+      {activeTab === 'map' && (
+        <div className="absolute top-20 left-4 z-10 bg-white/90 backdrop-blur-md rounded-full px-4 py-2 shadow-lg">
+          <span className="text-sm font-semibold text-gray-700">
+            {alerts.length} active alerts
+          </span>
+        </div>
+      )}
+
+
+      {/* Bottom Navigation */}
+      <BottomNav
+        activeTab={activeTab}
+        onTabChange={(tab) => {
+          setActiveTab(tab);
+          if (tab === 'profile' && !token) {
+            setIsAuthModalOpen(true);
+          }
+        }}
+        onCreateClick={() => {
+          if (!token) {
+            setIsAuthModalOpen(true);
+          } else if (!userLocation) {
+            requestLocation();
+          } else {
+            setIsCreateModalOpen(true);
+          }
+        }}
+        isAuthenticated={!!token}
+      />
+
+      {/* Modals */}
+      <CreateAlertModal
+        isOpen={isCreateModalOpen}
+        onClose={() => {
+          setIsCreateModalOpen(false);
+          setActiveTab('map');
+        }}
+        onSubmit={handleCreateAlert}
+        userLocation={userLocation}
+      />
+
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => {
+          setIsAuthModalOpen(false);
+          setActiveTab('map');
+        }}
+        onLogin={handleLogin}
+        onRegister={handleRegister}
+      />
+    </div>
+  );
+}
