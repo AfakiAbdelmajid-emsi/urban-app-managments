@@ -7,12 +7,14 @@ import { api } from '@/lib/api';
 import { useSocket } from '@/hooks/useSocket';
 import { calculateDistance, formatDistance } from '@/lib/distance';
 import { getCachedRoadName } from '@/lib/geocoding';
+import { decodeJWT } from '@/lib/jwt';
 import CreateAlertModal from '@/components/CreateAlertModal';
 import AuthModal from '@/components/AuthModal';
 import BottomNav from '@/components/BottomNav';
 import AIPage from '@/components/AIPage';
 import ProfilePage from '@/components/ProfilePage';
 import EmergencyPage from '@/components/EmergencyPage';
+import ToastNotification, { Toast } from '@/components/ToastNotification';
 import { 
   AlertCircle, 
   MapPin, 
@@ -63,7 +65,8 @@ export default function Home() {
   const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
   const [activeTab, setActiveTab] = useState<'map' | 'create' | 'emergency' | 'ai' | 'profile'>('map');
   const [distanceThreshold, setDistanceThreshold] = useState<number>(5); // Default 5km
-  const { socket, connected } = useSocket(token);
+  const [toast, setToast] = useState<Toast | null>(null);
+  const { socket, connected, connectionError } = useSocket(token);
 
   // Load token and distance threshold from localStorage
   useEffect(() => {
@@ -141,11 +144,14 @@ export default function Home() {
     requestLocation();
   }, []);
 
-  // Fetch initial alerts and enrich with road names
+  // Fetch alerts - FILTERED by kilometers on backend if location is available
   useEffect(() => {
     const fetchAlerts = async () => {
       try {
-        const fetchedAlerts = await api.getAllAlerts();
+        // Use backend filtering by kilometers if user location is available
+        const fetchedAlerts = userLocation
+          ? await api.getAllAlerts(userLocation[0], userLocation[1], distanceThreshold)
+          : await api.getAllAlerts();
         
         // Enrich alerts with road names if they don't have them
         const enrichedAlerts = await Promise.all(
@@ -175,28 +181,46 @@ export default function Home() {
     };
     
     fetchAlerts();
-  }, []);
+  }, [userLocation, distanceThreshold]);
 
-  // Filter alerts by distance from user location
-  const filteredAlerts = useMemo(() => {
-    if (!userLocation) return alerts;
+  // Alerts are already FILTERED by kilometers on the backend, so use them directly
+  const filteredAlerts = alerts;
+
+  // Helper function to get alert type label
+  const getAlertTypeLabel = (type: string): string => {
+    const alertLabels: Record<string, string> = {
+      accident: 'Accident',
+      major_accident: 'Major Accident',
+      emergency_situation: 'Emergency Situation',
+      heavy_traffic: 'Heavy Traffic',
+      traffic_jam: 'Traffic Jam',
+      road_blocked: 'Road Blocked',
+      road_closed: 'Road Closed',
+      construction: 'Construction',
+      road_works: 'Road Works',
+      police_activity: 'Police Activity',
+      crime_reported: 'Crime Reported',
+      protest_demonstration: 'Protest / Demonstration',
+      hazard_on_road: 'Hazard on Road',
+      flooded_road: 'Flooded Road',
+      fire_on_road: 'Fire on Road',
+      fire: 'Fire',
+      flood: 'Flood',
+      crime: 'Crime',
+      medical: 'Medical Emergency',
+      other: 'Alert',
+    };
     
-    return alerts.filter((alert) => {
-      const distance = calculateDistance(
-        userLocation[0],
-        userLocation[1],
-        alert.latitude,
-        alert.longitude
-      );
-      return distance <= distanceThreshold;
-    });
-  }, [alerts, userLocation, distanceThreshold]);
+    return alertLabels[type.toLowerCase()] || type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+  };
 
   // Socket listeners
   useEffect(() => {
     if (!socket) return;
 
     socket.on('alert_created', async (newAlert: Alert) => {
+      console.log('🔔 New alert received via socket:', newAlert.type);
+      
       // Enrich new alert with road name if it doesn't have one
       let enrichedAlert = newAlert;
       if (!newAlert.roadName) {
@@ -210,6 +234,55 @@ export default function Home() {
         } catch (error) {
           console.error('Error enriching new alert with road name:', error);
         }
+      }
+      
+      // Check if alert is near user and show notification (don't show for own alerts)
+      // Only show notification if alert is within distance threshold
+      if (userLocation) {
+        // Don't show notification if user created this alert
+        let isOwnAlert = false;
+        if (token && enrichedAlert.userId) {
+          try {
+            const decoded = decodeJWT(token);
+            if (decoded?.id === enrichedAlert.userId) {
+              isOwnAlert = true;
+              console.log('📱 Skipping notification - user created this alert');
+            }
+          } catch (error) {
+            console.error('Error decoding token:', error);
+          }
+        }
+        
+        if (!isOwnAlert) {
+          const distance = calculateDistance(
+            userLocation[0],
+            userLocation[1],
+            enrichedAlert.latitude,
+            enrichedAlert.longitude
+          );
+          
+          console.log(`📍 Alert distance: ${distance.toFixed(2)} km (threshold: ${distanceThreshold} km)`);
+          
+          // Only show notification if alert is within distance threshold
+          if (distance <= distanceThreshold) {
+            const alertTypeLabel = getAlertTypeLabel(enrichedAlert.type);
+            const address = enrichedAlert.roadName || enrichedAlert.fullAddress || 'Unknown location';
+            
+            console.log(`🔔 Showing toast notification: ${alertTypeLabel} at ${address} (${distance.toFixed(1)} km away)`);
+            
+            setToast({
+              id: enrichedAlert._id || Date.now().toString(),
+              message: `${alertTypeLabel} nearby!`,
+              address: address,
+              distance: distance,
+              type: 'alert',
+            });
+          } else {
+            console.log(`⏭️ Alert too far (${distance.toFixed(2)} km > ${distanceThreshold} km threshold) - not showing notification`);
+          }
+        }
+      } else {
+        console.log('⏭️ No user location - skipping notification (location required for distance calculation)');
       }
       
       setAlerts((prev) => {
@@ -246,7 +319,7 @@ export default function Home() {
       socket.off('alert_denied');
       socket.off('alert_deleted');
     };
-  }, [socket]);
+  }, [socket, userLocation, distanceThreshold, token]);
 
   const handleLogin = async (email: string, password: string) => {
     const data = await api.login(email, password);
@@ -450,6 +523,16 @@ export default function Home() {
       {/* Map-specific content */}
       {activeTab === 'map' && (
         <>
+
+      {/* Socket Connection Status - Only show if disconnected with error */}
+      {connectionError && !connected && (
+        <div className="absolute top-16 left-4 right-4 z-30 bg-yellow-500 text-white px-4 py-2 rounded-lg shadow-lg text-sm">
+          <div className="flex items-center gap-2">
+            <AlertCircle size={16} />
+            <span>Socket disconnected: {connectionError}</span>
+          </div>
+        </div>
+      )}
 
       {/* Header */}
       <div className="absolute top-0 left-0 right-0 z-10 bg-gradient-to-b from-black/50 to-transparent p-4">
@@ -702,7 +785,7 @@ export default function Home() {
       {activeTab === 'map' && userLocation && (
         <div className="absolute top-20 left-4 z-10 bg-white/90 backdrop-blur-md rounded-full px-4 py-2 shadow-lg">
           <span className="text-sm font-semibold text-gray-700">
-            {filteredAlerts.length} alerts within {distanceThreshold}km
+            {filteredAlerts.length} alerts T FILTRED within {distanceThreshold}km
           </span>
         </div>
       )}
@@ -711,7 +794,7 @@ export default function Home() {
       {activeTab === 'map' && userLocation && (
         <div className="absolute top-20 right-4 z-10 bg-white/90 backdrop-blur-md rounded-2xl p-3 shadow-lg max-w-[200px]">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-semibold text-gray-700">Distance Filter</span>
+            <span className="text-xs font-semibold text-gray-700">T FILTRED</span>
             <span className="text-xs text-gray-500">{distanceThreshold}km</span>
           </div>
           <input
@@ -770,6 +853,12 @@ export default function Home() {
         }}
         onLogin={handleLogin}
         onRegister={handleRegister}
+      />
+
+      {/* Toast Notification */}
+      <ToastNotification
+        toast={toast}
+        onClose={() => setToast(null)}
       />
     </div>
   );

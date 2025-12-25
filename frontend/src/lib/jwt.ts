@@ -16,3 +16,4 @@ export function decodeJWT(token: string): { id?: string; [key: string]: any } | 
     return null;
   }
 }
+

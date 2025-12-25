@@ -12,7 +12,14 @@ import {
 } from './schemas/authenticated-socket';
 
 @WebSocketGateway({
-  cors: { origin: '*' },
+  cors: {
+    origin: true, // Allow all origins (will be validated by CORS middleware)
+    credentials: true,
+    methods: ['GET', 'POST'],
+    allowedHeaders: ['authorization', 'content-type'],
+  },
+  transports: ['websocket'], // Force WebSocket transport only
+  allowEIO3: true, // Allow Engine.IO v3 clients for compatibility
 })
 export class AlertsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()

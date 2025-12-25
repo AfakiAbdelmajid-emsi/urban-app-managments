@@ -7,6 +7,7 @@ import {
   Delete,
   UseGuards,
   Req,
+  Query,
 } from '@nestjs/common';
 import { AlertsService } from './alerts.service';
 import { CreateAlertDto } from './dto/create-alert.dto';
@@ -24,9 +25,29 @@ export class AlertsController {
     return this.alertsService.createAlert(req.user.userId, dto);
   }
 
-  // 🔍 GET ALL ALERTS (PUBLIC)
+  // 🔍 GET ALL ALERTS (PUBLIC) - Can be FILTERED by kilometers if lat, lon, and distanceKm are provided
   @Get()
-  getAll() {
+  getAll(
+    @Query('lat') lat?: string,
+    @Query('lon') lon?: string,
+    @Query('distanceKm') distanceKm?: string,
+    @Query('userId') userId?: string,
+  ) {
+    // If userId is provided and user is authenticated, filter by userId
+    if (userId) {
+      return this.alertsService.getAlertsByUserId(userId);
+    }
+    
+    if (lat && lon && distanceKm) {
+      const latitude = parseFloat(lat);
+      const longitude = parseFloat(lon);
+      const distance = parseFloat(distanceKm);
+      return this.alertsService.getAllAlertsFilteredByKilometers(
+        latitude,
+        longitude,
+        distance,
+      );
+    }
     return this.alertsService.getAllAlerts();
   }
 

@@ -28,8 +28,12 @@ export const api = {
   },
 
   // Alert endpoints
-  async getAllAlerts() {
-    const res = await fetch('/api/alerts');
+  async getAllAlerts(latitude?: number, longitude?: number, distanceKm?: number) {
+    let url = '/api/alerts';
+    if (latitude !== undefined && longitude !== undefined && distanceKm !== undefined) {
+      url += `?lat=${latitude}&lon=${longitude}&distanceKm=${distanceKm}`;
+    }
+    const res = await fetch(url);
     if (!res.ok) throw new Error('Failed to fetch alerts');
     return res.json();
   },
@@ -103,15 +107,14 @@ export const api = {
   },
 
   async getUserAlerts(token: string, userId: string) {
-    // Get all alerts and filter by userId
-    const res = await fetch('/api/alerts', {
+    // Get alerts filtered by userId from backend
+    const res = await fetch(`/api/alerts?userId=${userId}`, {
       headers: {
         'Authorization': `Bearer ${token}`,
       },
     });
     if (!res.ok) throw new Error('Failed to fetch user alerts');
-    const allAlerts = await res.json();
-    return allAlerts.filter((alert: any) => alert.userId === userId);
+    return res.json();
   },
 };
 

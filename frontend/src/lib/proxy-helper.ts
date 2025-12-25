@@ -5,8 +5,17 @@ export async function proxyRequest(
   path: string,
   request: Request
 ): Promise<Response> {
-  const BACKEND_URL = 'http://localhost:3001';
-  const url = new URL(path, BACKEND_URL);
+  const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_BACKEND_URL || 'https://urban-app-managments-production.up.railway.app';
+  // Remove trailing slash if present and ensure path starts with /
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  const baseUrl = BACKEND_URL.endsWith('/') ? BACKEND_URL.slice(0, -1) : BACKEND_URL;
+  const url = new URL(cleanPath, baseUrl);
+  
+  // Preserve query parameters from the original request
+  const requestUrl = new URL(request.url);
+  requestUrl.searchParams.forEach((value, key) => {
+    url.searchParams.append(key, value);
+  });
 
   // Get the request body if it exists
   let body: string | undefined;

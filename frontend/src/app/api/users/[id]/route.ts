@@ -8,3 +8,4 @@ export async function GET(
   const { id } = await params;
   return proxyRequest(`/users/${id}`, request);
 }
+

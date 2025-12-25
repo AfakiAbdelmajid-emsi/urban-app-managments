@@ -5,9 +5,18 @@
 Create a `.env.local` file in the `frontend` directory with the following variables:
 
 ```env
-NEXT_PUBLIC_API_URL=http://localhost:3000
+# Backend API URL - Railway Production (Default)
+NEXT_PUBLIC_API_URL=https://urban-app-managments-production.up.railway.app
+NEXT_PUBLIC_BACKEND_URL=https://urban-app-managments-production.up.railway.app
+
+# Socket.IO Server URL - Railway Production (Default)
+NEXT_PUBLIC_SOCKET_URL=https://urban-app-managments-production.up.railway.app
+
+# Mapbox Token (Required)
 NEXT_PUBLIC_MAPBOX_TOKEN=your_mapbox_token_here
 ```
+
+**Note:** If you don't create `.env.local`, the app will automatically use the Railway production backend URL as the default.
 
 ### Getting a Mapbox Token
 
@@ -19,21 +28,20 @@ NEXT_PUBLIC_MAPBOX_TOKEN=your_mapbox_token_here
 
 ## Running the Application
 
-1. **Start the Backend**:
-   ```bash
-   cd backend
-   npm install
-   npm run start:dev
-   ```
+**Note:** The frontend is configured to use the Railway production backend by default. No local backend setup is required.
 
-2. **Start the Frontend**:
+1. **Start the Frontend**:
    ```bash
    cd frontend
    npm install
    npm run dev
    ```
 
-3. Open [http://localhost:3001](http://localhost:3001) in your mobile browser or browser dev tools (mobile view)
+2. Open [http://localhost:3000](http://localhost:3000) in your browser
+
+The frontend will automatically connect to the Railway production backend:
+- API requests: `https://urban-app-managments-production.up.railway.app`
+- WebSocket connections: `https://urban-app-managments-production.up.railway.app`
 
 ## Features
 
@@ -79,10 +87,18 @@ The app connects to these backend endpoints:
 
 ## Mobile Testing
 
-To test on your mobile device:
+Since the app uses the Railway production backend, you can access it from any device:
 
-1. Make sure your mobile and computer are on the same network
-2. Find your computer's local IP address
-3. Update `NEXT_PUBLIC_API_URL` to use your IP (e.g., `http://192.168.1.100:3000`)
-4. Access the app from your mobile browser using your IP (e.g., `http://192.168.1.100:3001`)
+1. **Using ngrok (for HTTPS on mobile)**:
+   ```bash
+   ngrok http 3000
+   ```
+   Access the ngrok URL on your mobile device
+
+2. **Using local network**:
+   - Make sure your mobile and computer are on the same network
+   - Find your computer's local IP address
+   - Access `http://YOUR_IP:3000` from your mobile browser
+
+The frontend will automatically connect to the Railway backend, so no backend configuration is needed on mobile.
 

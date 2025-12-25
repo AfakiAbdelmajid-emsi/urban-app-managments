@@ -23,6 +23,7 @@ export default function ProfilePage({ token, onLogout, onLogin }: ProfilePagePro
   const [user, setUser] = useState<UserProfile | null>(null);
   const [userAlerts, setUserAlerts] = useState<Alert[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [showMyAlerts, setShowMyAlerts] = useState(false);
   const [stats, setStats] = useState({
     alertsCreated: 0,
@@ -40,6 +41,7 @@ export default function ProfilePage({ token, onLogout, onLogin }: ProfilePagePro
     const fetchUserData = async () => {
       try {
         setIsLoading(true);
+        setError(null);
         const decoded = decodeJWT(token);
         if (!decoded?.id) {
           throw new Error('Invalid token');
@@ -63,6 +65,7 @@ export default function ProfilePage({ token, onLogout, onLogin }: ProfilePagePro
         });
       } catch (error) {
         console.error('Error fetching user data:', error);
+        setError(error instanceof Error ? error.message : 'Failed to load profile data');
       } finally {
         setIsLoading(false);
       }
@@ -113,6 +116,58 @@ export default function ProfilePage({ token, onLogout, onLogin }: ProfilePagePro
       <div className="flex flex-col items-center justify-center h-full bg-white">
         <Loader2 size={48} className="text-blue-500 animate-spin mb-4" />
         <p className="text-gray-500">Loading profile...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full bg-white px-4">
+        <AlertCircle size={48} className="text-red-500 mb-4" />
+        <h2 className="text-xl font-bold text-gray-700 mb-2">Error</h2>
+        <p className="text-gray-500 text-center mb-6">{error}</p>
+        <button
+          onClick={() => {
+            setError(null);
+            setIsLoading(true);
+            if (token) {
+              const decoded = decodeJWT(token);
+              if (decoded?.id) {
+                Promise.all([
+                  api.getUserProfile(token, decoded.id),
+                  api.getUserAlerts(token, decoded.id)
+                ])
+                  .then(([userData, alerts]) => {
+                    setUser(userData);
+                    setUserAlerts(alerts);
+                    const totalConfirmations = alerts.reduce((sum: number, alert: Alert) => sum + alert.confirmations, 0);
+                    const totalDenials = alerts.reduce((sum: number, alert: Alert) => sum + alert.denials, 0);
+                    setStats({
+                      alertsCreated: alerts.length,
+                      totalConfirmations,
+                      totalDenials,
+                    });
+                  })
+                  .catch((err) => {
+                    setError(err instanceof Error ? err.message : 'Failed to load profile data');
+                  })
+                  .finally(() => setIsLoading(false));
+              }
+            }
+          }}
+          className="px-6 py-3 bg-blue-500 text-white font-semibold rounded-2xl hover:bg-blue-600 transition-colors"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full bg-white">
+        <AlertCircle size={48} className="text-gray-400 mb-4" />
+        <p className="text-gray-500">No user data available</p>
       </div>
     );
   }

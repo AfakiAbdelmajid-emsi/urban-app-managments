@@ -42,6 +42,17 @@ body {
   animation: slide-up 0.3s ease-out;
 }
 
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
 /* Custom popup styling for mapbox */
 .mapboxgl-popup-content {
   padding: 0 !important;
