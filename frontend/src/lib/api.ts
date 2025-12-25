@@ -1,8 +1,16 @@
-// All API calls go through Next.js API routes which proxy to the NestJS backend
+// Direct API calls to Railway backend
+const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_BACKEND_URL || 'https://urban-app-managments-production.up.railway.app';
+
+function getBackendUrl(path: string): string {
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  const baseUrl = BACKEND_URL.endsWith('/') ? BACKEND_URL.slice(0, -1) : BACKEND_URL;
+  return `${baseUrl}${cleanPath}`;
+}
+
 export const api = {
   // Auth endpoints
   async login(email: string, password: string) {
-    const res = await fetch('/api/auth/login', {
+    const res = await fetch(getBackendUrl('/auth/login'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
@@ -15,7 +23,7 @@ export const api = {
   },
 
   async register(email: string, password: string, username: string) {
-    const res = await fetch('/api/auth/register', {
+    const res = await fetch(getBackendUrl('/auth/register'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password, username }),
@@ -29,7 +37,7 @@ export const api = {
 
   // Alert endpoints
   async getAllAlerts(latitude?: number, longitude?: number, distanceKm?: number) {
-    let url = '/api/alerts';
+    let url = getBackendUrl('/alerts');
     if (latitude !== undefined && longitude !== undefined && distanceKm !== undefined) {
       url += `?lat=${latitude}&lon=${longitude}&distanceKm=${distanceKm}`;
     }
@@ -39,7 +47,7 @@ export const api = {
   },
 
   async createAlert(token: string, data: any) {
-    const res = await fetch('/api/alerts', {
+    const res = await fetch(getBackendUrl('/alerts'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -52,7 +60,7 @@ export const api = {
   },
 
   async confirmAlert(token: string, id: string) {
-    const res = await fetch(`/api/alerts/${id}/confirm`, {
+    const res = await fetch(getBackendUrl(`/alerts/${id}/confirm`), {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}` },
     });
@@ -61,7 +69,7 @@ export const api = {
   },
 
   async denyAlert(token: string, id: string) {
-    const res = await fetch(`/api/alerts/${id}/deny`, {
+    const res = await fetch(getBackendUrl(`/alerts/${id}/deny`), {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}` },
     });
@@ -70,7 +78,7 @@ export const api = {
   },
 
   async deleteAlert(token: string, id: string) {
-    const res = await fetch(`/api/alerts/${id}`, {
+    const res = await fetch(getBackendUrl(`/alerts/${id}`), {
       method: 'DELETE',
       headers: { 'Authorization': `Bearer ${token}` },
     });
@@ -80,7 +88,7 @@ export const api = {
 
   // AI endpoints
   async askAI(token: string, message: string) {
-    const res = await fetch('/api/ai/ask', {
+    const res = await fetch(getBackendUrl('/ai/ask'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -97,7 +105,7 @@ export const api = {
 
   // User endpoints
   async getUserProfile(token: string, userId: string) {
-    const res = await fetch(`/api/users/${userId}`, {
+    const res = await fetch(getBackendUrl(`/users/${userId}`), {
       headers: {
         'Authorization': `Bearer ${token}`,
       },
@@ -108,7 +116,7 @@ export const api = {
 
   async getUserAlerts(token: string, userId: string) {
     // Get alerts filtered by userId from backend
-    const res = await fetch(`/api/alerts?userId=${userId}`, {
+    const res = await fetch(getBackendUrl(`/alerts?userId=${userId}`), {
       headers: {
         'Authorization': `Bearer ${token}`,
       },
