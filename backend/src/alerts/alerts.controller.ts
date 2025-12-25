@@ -25,35 +25,51 @@ export class AlertsController {
     return this.alertsService.createAlert(req.user.userId, dto);
   }
 
-  // 🔍 GET ALL ALERTS (PUBLIC) - Can be FILTERED by kilometers if lat, lon, and distanceKm are provided
+  // 🔍 GET ALL ALERTS (PUBLIC) - Crash-proof with validation
   @Get()
-  getAll(
+  async getAll(
     @Query('lat') lat?: string,
     @Query('lon') lon?: string,
     @Query('distanceKm') distanceKm?: string,
     @Query('userId') userId?: string,
-  ) {
-    // If userId is provided and user is authenticated, filter by userId
-    if (userId) {
-      return this.alertsService.getAlertsByUserId(userId);
+  ): Promise<any[]> {
+    try {
+      // If userId is provided, filter by userId
+      if (userId) {
+        return await this.alertsService.getAlertsByUserId(userId);
+      }
+      
+      // If lat, lon, and distanceKm are provided, filter by distance
+      if (lat && lon && distanceKm) {
+        const latitude = parseFloat(lat);
+        const longitude = parseFloat(lon);
+        const distance = parseFloat(distanceKm);
+
+        // Validate parsed values
+        if (isNaN(latitude) || isNaN(longitude) || isNaN(distance)) {
+          console.warn('⚠️ [GET ALL] Invalid query parameters, falling back to all alerts');
+          return await this.alertsService.getAllAlerts();
+        }
+
+        return await this.alertsService.getAllAlertsFilteredByKilometers(
+          latitude,
+          longitude,
+          distance,
+        );
+      }
+
+      // Default: return all alerts
+      return await this.alertsService.getAllAlerts();
+    } catch (error) {
+      console.error('❌ [GET ALL] Controller error:', error);
+      // Return empty array instead of crashing
+      return [];
     }
-    
-    if (lat && lon && distanceKm) {
-      const latitude = parseFloat(lat);
-      const longitude = parseFloat(lon);
-      const distance = parseFloat(distanceKm);
-      return this.alertsService.getAllAlertsFilteredByKilometers(
-        latitude,
-        longitude,
-        distance,
-      );
-    }
-    return this.alertsService.getAllAlerts();
   }
 
   // 🔍 GET ONE ALERT (PUBLIC)
   @Get(':id')
-  getOne(@Param('id') id: string) {
+  getOne(@Param('id') id: string): Promise<any> {
     return this.alertsService.getAlertById(id);
   }
 

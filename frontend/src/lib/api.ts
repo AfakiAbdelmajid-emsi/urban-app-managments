@@ -1,5 +1,5 @@
 // Direct API calls to Railway backend
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_BACKEND_URL || 'https://urban-app-managments-production.up.railway.app';
+const BACKEND_URL = 'https://urban-app-managments-production.up.railway.app';
 
 function getBackendUrl(path: string): string {
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
