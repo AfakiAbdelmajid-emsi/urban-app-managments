@@ -15,6 +15,7 @@ async function bootstrap() {
       origin: [
         'http://localhost:3000',
         'http://127.0.0.1:3000',
+        'https://unflapping-marcelle-particularistically.ngrok-free.dev/',
         'https://urban-app-managments-production.up.railway.app',
         /^https:\/\/.*\.railway\.app$/,
         /^https:\/\/.*\.ngrok\.(io|app)$/,
