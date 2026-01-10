@@ -4,6 +4,7 @@ import { Model } from 'mongoose';
 import { Alert, AlertDocument } from './schemas/alert.schema';
 import { CreateAlertDto } from './dto/create-alert.dto';
 import { AlertsGateway } from './alerts.gateway';
+import { CloudinaryService } from '../utils/cloudinary.service';
 
 @Injectable()
 export class AlertsService {
@@ -11,6 +12,7 @@ export class AlertsService {
     @InjectModel(Alert.name)
     private readonly alertModel: Model<AlertDocument>,
     private readonly alertsGateway: AlertsGateway,
+    private readonly cloudinaryService: CloudinaryService,
   ) {}
 
   // 🔴 CREATE - Crash-proof with validation
@@ -305,15 +307,27 @@ export class AlertsService {
     }
   }
 
-  // 🗑️ DELETE - Crash-proof
+  // 🗑️ DELETE - Crash-proof with Cloudinary cleanup
   async deleteAlert(id: string) {
     try {
       if (!id || typeof id !== 'string') {
         throw new NotFoundException('Invalid alert ID');
       }
 
-      const alert = await this.alertModel.findByIdAndDelete(id).lean();
+      const alert = await this.alertModel.findById(id).lean();
       if (!alert) throw new NotFoundException('Alert not found');
+
+      // Delete image from Cloudinary if it exists
+      if ((alert as any).photo) {
+        try {
+          await this.cloudinaryService.deleteImage((alert as any).photo);
+        } catch (cloudinaryError) {
+          console.warn(`⚠️ [DELETE] Failed to delete image from Cloudinary: ${cloudinaryError}`);
+          // Continue with alert deletion even if image deletion fails
+        }
+      }
+
+      await this.alertModel.findByIdAndDelete(id);
 
       const alertId = (alert as any)._id?.toString() || id;
       this.alertsGateway.emitAlertDeleted(alertId).catch((error) => {

@@ -71,7 +71,8 @@ export default function CreateAlertModal({
 }: CreateAlertModalProps) {
   const [type, setType] = useState('accident');
   const [description, setDescription] = useState('');
-  const [photo, setPhoto] = useState<string | null>(null);
+  const [photo, setPhoto] = useState<string | null>(null); // For preview
+  const [photoFile, setPhotoFile] = useState<File | null>(null); // For upload
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string>(Object.keys(ALERT_CATEGORIES)[0]);
   const [isCategoryOpen, setIsCategoryOpen] = useState(false);
@@ -105,9 +106,10 @@ export default function CreateAlertModal({
   const handleImageChange = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      setPhotoFile(file); // Store the File object
       const reader = new FileReader();
       reader.onloadend = () => {
-        setPhoto(reader.result as string);
+        setPhoto(reader.result as string); // Keep for preview
       };
       reader.readAsDataURL(file);
     }
@@ -136,8 +138,15 @@ export default function CreateAlertModal({
       const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.drawImage(videoRef.current, 0, 0);
-        const imageData = canvas.toDataURL('image/jpeg', 0.8);
-        setPhoto(imageData);
+        // Convert canvas to File
+        canvas.toBlob((blob) => {
+          if (blob) {
+            const file = new File([blob], 'photo.jpg', { type: 'image/jpeg' });
+            setPhotoFile(file); // Store the File object
+            const imageData = canvas.toDataURL('image/jpeg', 0.8);
+            setPhoto(imageData); // Keep for preview
+          }
+        }, 'image/jpeg', 0.8);
         stopCamera();
       }
     }
@@ -167,12 +176,13 @@ export default function CreateAlertModal({
         longitude: userLocation[1],
         roadName: roadName || undefined,
         fullAddress: fullAddress || undefined,
-        photo: photo || undefined,
+        photo: photoFile || undefined, // Send File object instead of base64
       });
       // Reset form
       setType('accident');
       setDescription('');
       setPhoto(null);
+      setPhotoFile(null); // Reset file too
       setSelectedCategory(Object.keys(ALERT_CATEGORIES)[0]);
       setIsCategoryOpen(false);
       stopCamera();
@@ -375,7 +385,10 @@ export default function CreateAlertModal({
                   className="w-full rounded-2xl"
                 />
                 <button
-                  onClick={() => setPhoto(null)}
+                  onClick={() => {
+                    setPhoto(null);
+                    setPhotoFile(null);
+                  }}
                   className="absolute top-2 right-2 w-10 h-10 bg-red-500 rounded-full text-white flex items-center justify-center shadow-lg hover:scale-110 transition-transform"
                 >
                   <X size={20} />

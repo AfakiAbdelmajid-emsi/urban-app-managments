@@ -21,6 +21,6 @@ export interface CreateAlertDto {
   longitude: number;
   roadName?: string;
   fullAddress?: string;
-  photo?: string;
+  photo?: File | string; // Can be File or string (for backward compatibility)
 }
 

@@ -8,20 +8,64 @@ import {
   UseGuards,
   Req,
   Query,
+  UseInterceptors,
+  UploadedFile,
+  ParseFilePipe,
+  MaxFileSizeValidator,
+  FileTypeValidator,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { AlertsService } from './alerts.service';
 import { CreateAlertDto } from './dto/create-alert.dto';
 import { JwtGuard } from '../auth/jwt/jwt.guard';
 import * as authRequest from '../auth/types/auth-request';
+import { CloudinaryService } from '../utils/cloudinary.service';
+import { imageFileFilter } from '../utils/file-upload.util';
 
 @Controller('alerts')
 export class AlertsController {
-  constructor(private readonly alertsService: AlertsService) {}
+  constructor(
+    private readonly alertsService: AlertsService,
+    private readonly cloudinaryService: CloudinaryService,
+  ) {}
 
-  // 🔴 CREATE ALERT (JWT)
+  // 🔴 CREATE ALERT (JWT) - With Cloudinary file upload
   @UseGuards(JwtGuard)
   @Post()
-  create(@Req() req: authRequest.AuthRequest, @Body() dto: CreateAlertDto) {
+  @UseInterceptors(
+    FileInterceptor('photo', {
+      storage: memoryStorage(),
+      fileFilter: imageFileFilter,
+      limits: {
+        fileSize: 5 * 1024 * 1024, // 5MB limit
+      },
+    }),
+  )
+  async create(
+    @Req() req: authRequest.AuthRequest,
+    @Body() dto: CreateAlertDto,
+    @UploadedFile(
+      new ParseFilePipe({
+        fileIsRequired: false,
+        validators: [
+          new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 }), // 5MB
+          new FileTypeValidator({ fileType: /(jpg|jpeg|png|gif|webp)/i }),
+        ],
+      }),
+    )
+    file?: Express.Multer.File,
+  ) {
+    // Upload to Cloudinary if file exists
+    if (file) {
+      try {
+        const imageUrl = await this.cloudinaryService.uploadImage(file);
+        dto.photo = imageUrl;
+      } catch (error) {
+        console.error('❌ [CREATE] Cloudinary upload failed:', error);
+        throw new Error('Failed to upload image');
+      }
+    }
     return this.alertsService.createAlert(req.user.userId, dto);
   }
 

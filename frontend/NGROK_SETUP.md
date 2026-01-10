@@ -92,3 +92,4 @@ Check browser console for Socket.IO connection messages:
 - Socket.IO uses WebSocket transport only (no polling)
 - Connection errors are logged to console for debugging
 
+

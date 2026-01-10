@@ -196,3 +196,4 @@ PORT=3001
 - Connection errors are logged to console for debugging
 - Visual feedback shows connection status in UI
 
+

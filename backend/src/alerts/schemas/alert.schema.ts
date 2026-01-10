@@ -25,6 +25,12 @@ export class Alert {
   @Prop()
   photo?: string;
 
+  @Prop()
+  roadName?: string;
+
+  @Prop()
+  fullAddress?: string;
+
   @Prop({ default: 0 })
   confirmations!: number;
 

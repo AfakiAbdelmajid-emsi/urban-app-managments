@@ -2,14 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
-
-/**
- * Get the Socket.IO server URL - always uses Railway production backend
- */
-function getSocketUrl(): string {
-  // Always use Railway production backend
-  return process.env.NEXT_PUBLIC_SOCKET_URL || 'https://urban-app-managments-production.up.railway.app';
-}
+import { SOCKET_URL } from '@/lib/config';
 
 export function useSocket(token: string | null) {
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -34,7 +27,7 @@ export function useSocket(token: string | null) {
       reconnectTimeoutRef.current = null;
     }
 
-    const socketUrl = getSocketUrl();
+    const socketUrl = SOCKET_URL;
     console.log('🔌 Connecting to Socket.IO server:', socketUrl);
 
     // Connect with or without token (anonymous viewing is allowed)

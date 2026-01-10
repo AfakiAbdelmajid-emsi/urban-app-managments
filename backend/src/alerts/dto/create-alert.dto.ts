@@ -4,4 +4,6 @@ export class CreateAlertDto {
   latitude!: number;
   longitude!: number;
   photo?: string;
+  roadName?: string;
+  fullAddress?: string;
 }
