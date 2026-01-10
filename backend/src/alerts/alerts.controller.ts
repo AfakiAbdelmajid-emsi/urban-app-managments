@@ -44,7 +44,7 @@ export class AlertsController {
   )
   async create(
     @Req() req: authRequest.AuthRequest,
-    @Body() dto: CreateAlertDto,
+    @Body() body: any,
     @UploadedFile(
       new ParseFilePipe({
         fileIsRequired: false,
@@ -56,16 +56,60 @@ export class AlertsController {
     )
     file?: Express.Multer.File,
   ) {
+    // Parse FormData - convert strings to proper types
+    // FormData sends all values as strings, so we need to parse numbers
+    const latitude = typeof body.latitude === 'string' ? parseFloat(body.latitude) : Number(body.latitude);
+    const longitude = typeof body.longitude === 'string' ? parseFloat(body.longitude) : Number(body.longitude);
+
+    // Log received values for debugging
+    console.log('📥 [CREATE] Received body:', {
+      type: body.type,
+      latitude: body.latitude,
+      longitude: body.longitude,
+      latitudeType: typeof body.latitude,
+      longitudeType: typeof body.longitude,
+    });
+
+    // Validate parsed coordinates
+    if (isNaN(latitude) || isNaN(longitude)) {
+      console.error('❌ [CREATE] Invalid coordinates received:', {
+        latitude: body.latitude,
+        longitude: body.longitude,
+        parsedLatitude: latitude,
+        parsedLongitude: longitude,
+      });
+      throw new Error(`Invalid coordinates: latitude=${body.latitude}, longitude=${body.longitude}`);
+    }
+
+    const dto: CreateAlertDto = {
+      type: body.type,
+      description: body.description || undefined,
+      latitude,
+      longitude,
+      roadName: body.roadName || undefined,
+      fullAddress: body.fullAddress || undefined,
+    };
+
     // Upload to Cloudinary if file exists
     if (file) {
       try {
+        console.log('📤 [CREATE] Uploading image to Cloudinary...');
         const imageUrl = await this.cloudinaryService.uploadImage(file);
         dto.photo = imageUrl;
+        console.log('✅ [CREATE] Image uploaded:', imageUrl);
       } catch (error) {
         console.error('❌ [CREATE] Cloudinary upload failed:', error);
         throw new Error('Failed to upload image');
       }
     }
+
+    console.log('✅ [CREATE] Creating alert with DTO:', {
+      type: dto.type,
+      latitude: dto.latitude,
+      longitude: dto.longitude,
+      hasPhoto: !!dto.photo,
+    });
+
     return this.alertsService.createAlert(req.user.userId, dto);
   }
 
