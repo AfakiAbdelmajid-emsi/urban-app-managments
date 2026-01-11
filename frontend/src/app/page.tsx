@@ -749,9 +749,23 @@ export default function Home() {
             <div className="w-12 h-1 bg-gray-300 rounded-full mx-auto mb-4" />
             <div className="flex items-start justify-between mb-4">
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-full flex items-center justify-center" style={{ 
-                  backgroundColor: getAlertColor(selectedAlert.type)
-                }}>
+                <div 
+                  className="w-12 h-12 rounded-full flex items-center justify-center border-2 transition-colors" 
+                  style={{ 
+                    backgroundColor: selectedAlert.status === 'VERIFIED' 
+                      ? '#22c55e' 
+                      : selectedAlert.status === 'REJECTED'
+                      ? '#ef4444'
+                      : selectedAlert.status === 'EXPIRED'
+                      ? '#6b7280'
+                      : getAlertColor(selectedAlert.type),
+                    borderColor: selectedAlert.status === 'VERIFIED' 
+                      ? '#16a34a' 
+                      : selectedAlert.status === 'REJECTED'
+                      ? '#dc2626'
+                      : 'transparent'
+                  }}
+                >
                   {getAlertIcon(selectedAlert.type)}
                 </div>
                 <div className="flex-1 min-w-0">

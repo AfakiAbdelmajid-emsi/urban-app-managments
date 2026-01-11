@@ -95,6 +95,23 @@ export default function AlertMap({ alerts, onAlertClick, userLocation }: AlertMa
     return colors[type.toLowerCase()] || '#6b7280';
   };
 
+  // Get marker color based on verification status
+  const getStatusColor = (status?: string, typeColor?: string): string => {
+    if (!status) return typeColor || '#6b7280';
+    
+    switch (status) {
+      case 'VERIFIED':
+        return '#22c55e'; // Green
+      case 'REJECTED':
+        return '#ef4444'; // Red
+      case 'EXPIRED':
+        return '#6b7280'; // Gray
+      case 'ACTIVE':
+      default:
+        return typeColor || '#eab308'; // Yellow for active (or type color)
+    }
+  };
+
   const getAlertIcon = (type: string) => {
     const typeLower = type.toLowerCase();
     const iconProps = { size: 20, className: 'text-white' };
@@ -234,8 +251,11 @@ export default function AlertMap({ alerts, onAlertClick, userLocation }: AlertMa
             }}
           >
             <div
-              className="flex items-center justify-center w-10 h-10 rounded-full shadow-lg cursor-pointer transform transition-transform hover:scale-110 active:scale-95"
-              style={{ backgroundColor: getAlertColor(alert.type) }}
+              className="flex items-center justify-center w-10 h-10 rounded-full shadow-lg cursor-pointer transform transition-transform hover:scale-110 active:scale-95 border-2"
+              style={{ 
+                backgroundColor: getStatusColor(alert.status, getAlertColor(alert.type)),
+                borderColor: alert.status === 'VERIFIED' ? '#16a34a' : alert.status === 'REJECTED' ? '#dc2626' : 'transparent'
+              }}
             >
               {getAlertIcon(alert.type)}
             </div>
@@ -255,12 +275,25 @@ export default function AlertMap({ alerts, onAlertClick, userLocation }: AlertMa
           >
             <div className="p-2 min-w-[200px]">
               <div className="flex items-center gap-2 mb-2">
-                <div style={{ color: getAlertColor(selectedAlert.type) }}>
+                <div style={{ color: getStatusColor(selectedAlert.status, getAlertColor(selectedAlert.type)) }}>
                   {getAlertIcon(selectedAlert.type)}
                 </div>
                 <h3 className="font-bold text-lg text-gray-700">
                   {selectedAlert.type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
                 </h3>
+                {selectedAlert.status && (
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                    selectedAlert.status === 'VERIFIED' ? 'bg-green-100 text-green-700' :
+                    selectedAlert.status === 'REJECTED' ? 'bg-red-100 text-red-700' :
+                    selectedAlert.status === 'EXPIRED' ? 'bg-gray-100 text-gray-700' :
+                    'bg-yellow-100 text-yellow-700'
+                  }`}>
+                    {selectedAlert.status === 'VERIFIED' ? '✓ Verified' :
+                     selectedAlert.status === 'REJECTED' ? '✗ Rejected' :
+                     selectedAlert.status === 'EXPIRED' ? '⏰ Expired' :
+                     '⏳ Active'}
+                  </span>
+                )}
               </div>
               {selectedAlert.roadName && (
                 <div className="flex items-center gap-1 mb-2 text-sm font-medium text-blue-600">

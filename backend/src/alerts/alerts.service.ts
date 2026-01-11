@@ -21,7 +21,58 @@ export class AlertsService {
     private readonly usersService: UsersService,
   ) {}
 
-  // 🔴 CREATE - Crash-proof with validation
+  // 🔍 Find duplicate alerts (same type, within 100m, created in last 10 minutes)
+  private async findDuplicateAlert(
+    type: string,
+    latitude: number,
+    longitude: number,
+    excludeUserId?: string,
+  ): Promise<AlertDocument | null> {
+    try {
+      // Time window: last 10 minutes
+      const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+
+      // Find alerts with same type, created in last 10 minutes, and still ACTIVE
+      const recentAlerts = await this.alertModel
+        .find({
+          type: type.toLowerCase(),
+          status: 'ACTIVE', // Only consider active alerts
+          createdAt: { $gte: tenMinutesAgo },
+          userId: { $ne: excludeUserId }, // Don't match user's own alerts
+        })
+        .lean()
+        .exec();
+
+      // Check distance for each alert (within 100 meters)
+      const maxDistance = 0.1; // 100 meters in kilometers
+
+      for (const alert of recentAlerts) {
+        const distance = this.calculateDistanceInKilometers(
+          latitude,
+          longitude,
+          alert.latitude,
+          alert.longitude,
+        );
+
+        // Check if within 100 meters (duplicate detection threshold)
+        if (distance <= maxDistance) {
+          console.log(
+            `🔍 [DUPLICATE] Found duplicate alert ${alert._id} at ${distance.toFixed(3)}km distance`,
+          );
+          // Return as AlertDocument (need to fetch full document for updates)
+          const fullAlert = await this.alertModel.findById(alert._id);
+          return fullAlert;
+        }
+      }
+
+      return null;
+    } catch (error) {
+      console.error('❌ [DUPLICATE] Error finding duplicate alert:', error);
+      return null; // Continue with creation if check fails
+    }
+  }
+
+  // 🔴 CREATE - Crash-proof with validation + Duplicate Detection
   async createAlert(userId: string, dto: CreateAlertDto) {
     try {
       // Validate userId
@@ -34,6 +85,86 @@ export class AlertsService {
         throw new Error('Invalid coordinates');
       }
 
+      // 🔍 Check for duplicate alerts (same type, within 100m, last 10 minutes)
+      const duplicateAlert = await this.findDuplicateAlert(
+        dto.type,
+        dto.latitude,
+        dto.longitude,
+        userId,
+      );
+
+      if (duplicateAlert) {
+        console.log(
+          `🔄 [DUPLICATE] Duplicate detected! Merging with alert ${duplicateAlert._id}`,
+        );
+
+        // Don't create new alert - instead, add user to confirmedBy (if not already there)
+        if (!duplicateAlert.confirmedBy.includes(userId)) {
+          if (!Array.isArray(duplicateAlert.confirmedBy)) {
+            duplicateAlert.confirmedBy = [];
+          }
+          duplicateAlert.confirmedBy.push(userId);
+          duplicateAlert.confirmations = duplicateAlert.confirmedBy.length;
+
+          // Recalculate confidence score
+          const oldStatus = duplicateAlert.status;
+          duplicateAlert.confidenceScore = await this.calculateConfidenceScore(duplicateAlert);
+
+          // Save updated alert
+          await duplicateAlert.save();
+
+          // Check state transitions
+          const newStatus = await this.updateAlertState(
+            duplicateAlert._id.toString(),
+            duplicateAlert.confidenceScore,
+          );
+
+          // Reload alert with updated status
+          const updatedAlert = await this.alertModel.findById(duplicateAlert._id).lean();
+
+          // If status changed to final state, update creator trust score (only once)
+          if (oldStatus === 'ACTIVE' && (newStatus === 'VERIFIED' || newStatus === 'REJECTED')) {
+            await this.updateCreatorTrustScore(updatedAlert as any, newStatus);
+          }
+
+          // Emit events (treat as confirmation)
+          this.alertsGateway.emitAlertConfirmed(updatedAlert).catch((error) => {
+            console.error('❌ [DUPLICATE] Error emitting alert_confirmed event:', error);
+          });
+
+          if (newStatus !== oldStatus) {
+            if (newStatus === 'VERIFIED') {
+              this.alertsGateway.emitAlertVerified(updatedAlert).catch((error) => {
+                console.error('❌ [DUPLICATE] Error emitting alert_verified event:', error);
+              });
+            } else if (newStatus === 'REJECTED') {
+              this.alertsGateway.emitAlertRejected(updatedAlert).catch((error) => {
+                console.error('❌ [DUPLICATE] Error emitting alert_rejected event:', error);
+              });
+            }
+          }
+
+          this.alertsGateway.emitConfidenceUpdated(updatedAlert).catch((error) => {
+            console.error('❌ [DUPLICATE] Error emitting confidence_updated event:', error);
+          });
+
+          console.log(
+            `✅ [DUPLICATE] Merged with existing alert ${duplicateAlert._id}. Confirmations: ${duplicateAlert.confirmations}, Status: ${newStatus}`,
+          );
+
+          // Return the updated alert (sanitized)
+          return this.sanitizeAlerts([updatedAlert as any])[0];
+        } else {
+          // User already confirmed this alert, just return it
+          console.log(
+            `ℹ️ [DUPLICATE] User already confirmed duplicate alert ${duplicateAlert._id}`,
+          );
+          const alertDoc = await this.alertModel.findById(duplicateAlert._id).lean();
+          return this.sanitizeAlerts([alertDoc as any])[0];
+        }
+      }
+
+      // No duplicate found - create new alert
       const alert = await new this.alertModel({
         ...dto,
         userId,
@@ -53,7 +184,7 @@ export class AlertsService {
         // Continue even if emit fails
       });
 
-      console.log(`✅ [CREATE] Alert created: ${alert._id}`);
+      console.log(`✅ [CREATE] New alert created: ${alert._id}`);
       return alert;
     } catch (error) {
       console.error('❌ [CREATE] Error creating alert:', error);
