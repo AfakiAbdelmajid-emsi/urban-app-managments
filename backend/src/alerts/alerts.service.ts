@@ -298,7 +298,10 @@ export class AlertsService {
   // Check and update alert state based on confirmations count
   private async updateAlertState(alertId: string, confidenceScore: number): Promise<'ACTIVE' | 'VERIFIED' | 'REJECTED' | 'EXPIRED'> {
     const alert = await this.alertModel.findById(alertId).lean();
-    if (!alert) return 'ACTIVE';
+    if (!alert) {
+      console.warn(`⚠️ [STATE] Alert ${alertId} not found`);
+      return 'ACTIVE';
+    }
 
     // Check if expired first (expired alerts can't change status)
     if (alert.expiresAt && new Date(alert.expiresAt) < new Date()) {
@@ -310,6 +313,7 @@ export class AlertsService {
 
     // Don't change status if already in final state (unless expired)
     if (alert.status === 'VERIFIED' || alert.status === 'REJECTED') {
+      console.log(`ℹ️ [STATE] Alert ${alertId} already in final state: ${alert.status}`);
       return alert.status as 'VERIFIED' | 'REJECTED';
     }
 
@@ -317,8 +321,16 @@ export class AlertsService {
 
     // Simplified: 3 confirmations = VERIFIED
     const confirmationsCount = alert.confirmations || 0;
-    if (confirmationsCount >= 3) {
+    const confirmedByCount = Array.isArray(alert.confirmedBy) ? alert.confirmedBy.length : 0;
+    
+    console.log(`🔍 [STATE] Alert ${alertId} - confirmations: ${confirmationsCount}, confirmedBy: ${confirmedByCount}, current status: ${alert.status}`);
+    
+    // Use confirmedBy length if confirmations count seems wrong
+    const actualConfirmations = confirmationsCount > 0 ? confirmationsCount : confirmedByCount;
+    
+    if (actualConfirmations >= 3) {
       newStatus = 'VERIFIED';
+      console.log(`✅ [STATE] Alert ${alertId} should be VERIFIED (confirmations: ${actualConfirmations})`);
     } else if (confidenceScore <= -3) {
       newStatus = 'REJECTED';
     } else {
@@ -327,10 +339,13 @@ export class AlertsService {
 
     // Update alert status if changed
     if (newStatus !== alert.status) {
+      console.log(`🔄 [STATE] Updating alert ${alertId} status: ${alert.status} → ${newStatus}`);
       await this.alertModel.findByIdAndUpdate(alertId, {
         status: newStatus,
         verified: newStatus === 'VERIFIED',
       });
+    } else {
+      console.log(`ℹ️ [STATE] Alert ${alertId} status unchanged: ${alert.status}`);
     }
 
     return newStatus;
@@ -395,9 +410,14 @@ export class AlertsService {
         alert.denials = Math.max(0, alert.denials - 1);
       }
 
-      // Add to confirmedBy
+      // Add to confirmedBy (ensure it's an array)
+      if (!Array.isArray(alert.confirmedBy)) {
+        alert.confirmedBy = [];
+      }
       alert.confirmedBy.push(voterId);
       alert.confirmations = alert.confirmedBy.length;
+
+      console.log(`📊 [CONFIRM] Alert ${id} - After adding ${voterId}, confirmations: ${alert.confirmations}, confirmedBy: ${alert.confirmedBy.length}`);
 
       // Recalculate confidence score
       const oldStatus = alert.status;
@@ -405,6 +425,7 @@ export class AlertsService {
 
       // Save alert
       await alert.save();
+      console.log(`💾 [CONFIRM] Alert ${id} saved with confirmations: ${alert.confirmations}, status: ${alert.status}`);
 
       // Check state transitions
       const newStatus = await this.updateAlertState(id, alert.confidenceScore);
