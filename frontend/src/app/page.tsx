@@ -40,7 +40,9 @@ import {
   Gauge,
   Shield,
   Navigation,
-  Users
+  Users,
+  Award,
+  TrendingUp
 } from 'lucide-react';
 
 // Dynamic import to avoid SSR issues with map
@@ -311,6 +313,52 @@ export default function Home() {
 
     socket.on('alert_deleted', ({ id }: { id: string }) => {
       setAlerts((prev) => prev.filter((a) => a._id !== id));
+      // Also close the alert details if it was deleted
+      setSelectedAlert((prev) => (prev?._id === id ? null : prev));
+    });
+
+    socket.on('alert_confidence_updated', (updatedAlert: Alert) => {
+      console.log('📊 Confidence updated:', updatedAlert._id, 'score:', updatedAlert.confidenceScore);
+      setAlerts((prev) =>
+        prev.map((a) => (a._id === updatedAlert._id ? updatedAlert : a))
+      );
+      // Update selected alert if it's the one being updated
+      setSelectedAlert((prev) => (prev?._id === updatedAlert._id ? updatedAlert : prev));
+    });
+
+    socket.on('alert_verified', (updatedAlert: Alert) => {
+      console.log('✅ Alert verified:', updatedAlert._id);
+      setAlerts((prev) =>
+        prev.map((a) => (a._id === updatedAlert._id ? updatedAlert : a))
+      );
+      setSelectedAlert((prev) => (prev?._id === updatedAlert._id ? updatedAlert : prev));
+      
+      // Show notification for verified alert
+      if (userLocation) {
+        const distance = calculateDistance(
+          userLocation[0],
+          userLocation[1],
+          updatedAlert.latitude,
+          updatedAlert.longitude
+        );
+        if (distance <= distanceThreshold) {
+          setToast({
+            id: `verified-${updatedAlert._id}`,
+            message: 'Alert verified!',
+            address: updatedAlert.roadName || 'Location',
+            distance: distance,
+            type: 'alert',
+          });
+        }
+      }
+    });
+
+    socket.on('alert_rejected', (updatedAlert: Alert) => {
+      console.log('❌ Alert rejected:', updatedAlert._id);
+      setAlerts((prev) =>
+        prev.map((a) => (a._id === updatedAlert._id ? updatedAlert : a))
+      );
+      setSelectedAlert((prev) => (prev?._id === updatedAlert._id ? updatedAlert : prev));
     });
 
     return () => {
@@ -318,6 +366,9 @@ export default function Home() {
       socket.off('alert_confirmed');
       socket.off('alert_denied');
       socket.off('alert_deleted');
+      socket.off('alert_confidence_updated');
+      socket.off('alert_verified');
+      socket.off('alert_rejected');
     };
   }, [socket, userLocation, distanceThreshold, token]);
 
@@ -483,6 +534,34 @@ export default function Home() {
         return <Hospital {...iconProps} />;
       default:
         return <MapPinIcon {...iconProps} />;
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'VERIFIED':
+        return 'bg-green-100 text-green-700 border-green-200';
+      case 'REJECTED':
+        return 'bg-red-100 text-red-700 border-red-200';
+      case 'EXPIRED':
+        return 'bg-gray-100 text-gray-700 border-gray-200';
+      case 'ACTIVE':
+      default:
+        return 'bg-yellow-100 text-yellow-700 border-yellow-200';
+    }
+  };
+
+  const getStatusLabel = (status: string) => {
+    switch (status) {
+      case 'VERIFIED':
+        return '✓ Verified';
+      case 'REJECTED':
+        return '✗ Rejected';
+      case 'EXPIRED':
+        return '⏰ Expired';
+      case 'ACTIVE':
+      default:
+        return '⏳ Active';
     }
   };
 
@@ -676,9 +755,16 @@ export default function Home() {
                   {getAlertIcon(selectedAlert.type)}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h3 className="text-xl font-bold text-gray-700">
-                    {selectedAlert.type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                  </h3>
+                  <div className="flex items-center gap-2 mb-1">
+                    <h3 className="text-xl font-bold text-gray-700">
+                      {selectedAlert.type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                    </h3>
+                    {selectedAlert.status && (
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-semibold border ${getStatusColor(selectedAlert.status)}`}>
+                        {getStatusLabel(selectedAlert.status)}
+                      </span>
+                    )}
+                  </div>
                   <div className="flex flex-col gap-1 mt-1">
                     {selectedAlert.roadName && (
                       <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
@@ -714,6 +800,45 @@ export default function Home() {
                 <X size={20} className="text-gray-700" />
               </button>
             </div>
+
+            {/* Confirmations & Status Info */}
+            {(selectedAlert.confirmations !== undefined || selectedAlert.status) && (
+              <div className="mb-4 p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-2xl border border-blue-100">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center">
+                      <TrendingUp size={20} className="text-white" />
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-500 mb-0.5">Confirmations</div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-2xl font-bold text-gray-700">
+                          {selectedAlert.confirmations || 0}
+                        </span>
+                        <span className="text-xs text-gray-500">/ 3 needed for verification</span>
+                      </div>
+                    </div>
+                  </div>
+                  {selectedAlert.verified && (
+                    <div className="flex items-center gap-1 px-3 py-1.5 bg-green-100 rounded-full">
+                      <CheckCircle size={16} className="text-green-600" />
+                      <span className="text-xs font-semibold text-green-700">Verified</span>
+                    </div>
+                  )}
+                </div>
+                <div className="mt-3 pt-3 border-t border-blue-200">
+                  <div className="text-xs text-gray-600">
+                    {selectedAlert.status === 'VERIFIED' 
+                      ? '✓ This alert has been verified by the community. Creator gained +0.1 trust score.'
+                      : selectedAlert.status === 'REJECTED'
+                      ? '✗ This alert was rejected. Creator lost -0.2 trust score.'
+                      : selectedAlert.status === 'EXPIRED'
+                      ? '⏰ This alert has expired.'
+                      : `⏳ Needs ${Math.max(0, 3 - (selectedAlert.confirmations || 0))} more confirmation${Math.max(0, 3 - (selectedAlert.confirmations || 0)) !== 1 ? 's' : ''} to be verified.`}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {selectedAlert.description && (
               <p className="text-gray-700 mb-4">{selectedAlert.description}</p>

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { User, LogOut, Settings, Bell, Shield, Mail, Calendar, MapPin, AlertCircle, Loader2, X, Trash2 } from 'lucide-react';
+import { User, LogOut, Settings, Bell, Shield, Mail, Calendar, MapPin, AlertCircle, Loader2, X, Trash2, Star, Award } from 'lucide-react';
 import { api } from '@/lib/api';
 import { decodeJWT } from '@/lib/jwt';
 import { Alert } from '@/types/alert';
@@ -16,6 +16,7 @@ interface UserProfile {
   _id: string;
   username: string;
   email: string;
+  trustScore?: number;
   createdAt: string;
 }
 
@@ -176,7 +177,7 @@ export default function ProfilePage({ token, onLogout, onLogin }: ProfilePagePro
     <div className="flex flex-col h-full bg-white">
       {/* Header */}
       <div className="bg-gradient-to-br from-blue-500 to-purple-600 px-6 pt-12 pb-8">
-        <div className="flex items-center gap-4 mb-6">
+        <div className="flex items-center gap-4 mb-4">
           <div className="w-20 h-20 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border-4 border-white/30">
             <User size={40} className="text-white" />
           </div>
@@ -192,6 +193,60 @@ export default function ProfilePage({ token, onLogout, onLogin }: ProfilePagePro
             )}
           </div>
         </div>
+
+        {/* Trust Score Badge */}
+        {user?.trustScore !== undefined && (
+          <div className="bg-white/20 backdrop-blur-md rounded-2xl p-4 border border-white/30">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-yellow-400/20 rounded-full flex items-center justify-center">
+                  <Award size={24} className="text-yellow-300" />
+                </div>
+                <div>
+                  <div className="text-white/80 text-xs font-medium mb-1">Trust Score</div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-2xl font-bold text-white">
+                      {typeof user.trustScore === 'number' ? user.trustScore.toFixed(1) : '1.0'}
+                    </div>
+                    <div className="text-white/60 text-xs">/ 5.0</div>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-1">
+                {[...Array(5)].map((_, i) => {
+                  const score = typeof user.trustScore === 'number' ? user.trustScore : 1.0;
+                  const isFilled = i < Math.floor(score);
+                  const isHalfFilled = i < score && i >= Math.floor(score);
+                  return (
+                    <Star
+                      key={i}
+                      size={18}
+                      className={
+                        isFilled
+                          ? 'text-yellow-300 fill-yellow-300'
+                          : isHalfFilled
+                          ? 'text-yellow-300 fill-yellow-300 opacity-60'
+                          : 'text-white/30'
+                      }
+                    />
+                  );
+                })}
+              </div>
+            </div>
+            <div className="mt-3 pt-3 border-t border-white/20">
+              <div className="text-white/70 text-xs">
+                {(() => {
+                  const score = typeof user.trustScore === 'number' ? user.trustScore : 1.0;
+                  if (score >= 4.0) return '🌟 Highly trusted community member';
+                  if (score >= 3.0) return '✨ Trusted contributor';
+                  if (score >= 2.0) return '👍 Reliable user';
+                  if (score >= 1.0) return '👤 Active member';
+                  return '⚠️ New member';
+                })()}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Stats */}

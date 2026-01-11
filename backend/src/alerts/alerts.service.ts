@@ -295,7 +295,7 @@ export class AlertsService {
     }
   }
 
-  // Check and update alert state based on confidence score
+  // Check and update alert state based on confirmations count
   private async updateAlertState(alertId: string, confidenceScore: number): Promise<'ACTIVE' | 'VERIFIED' | 'REJECTED' | 'EXPIRED'> {
     const alert = await this.alertModel.findById(alertId).lean();
     if (!alert) return 'ACTIVE';
@@ -315,7 +315,9 @@ export class AlertsService {
 
     let newStatus: 'ACTIVE' | 'VERIFIED' | 'REJECTED' = 'ACTIVE';
 
-    if (confidenceScore >= 5) {
+    // Simplified: 3 confirmations = VERIFIED
+    const confirmationsCount = alert.confirmations || 0;
+    if (confirmationsCount >= 3) {
       newStatus = 'VERIFIED';
     } else if (confidenceScore <= -3) {
       newStatus = 'REJECTED';
@@ -436,7 +438,7 @@ export class AlertsService {
         console.error('❌ [CONFIRM] Error emitting confidence_updated event:', error);
       });
 
-      console.log(`✅ [CONFIRM] Alert ${id} confirmed by user ${voterId}. Confidence: ${alert.confidenceScore}, Status: ${newStatus}`);
+      console.log(`✅ [CONFIRM] Alert ${id} confirmed by user ${voterId}. Confirmations: ${alert.confirmations}, Status: ${newStatus}`);
       return updatedAlert;
     } catch (error) {
       console.error(`❌ [CONFIRM] Error confirming alert ${id}:`, error);
@@ -518,7 +520,7 @@ export class AlertsService {
         console.error('❌ [DENY] Error emitting confidence_updated event:', error);
       });
 
-      console.log(`✅ [DENY] Alert ${id} denied by user ${voterId}. Confidence: ${alert.confidenceScore}, Status: ${newStatus}`);
+      console.log(`✅ [DENY] Alert ${id} denied by user ${voterId}. Confirmations: ${alert.confirmations}, Status: ${newStatus}`);
       return updatedAlert;
     } catch (error) {
       console.error(`❌ [DENY] Error denying alert ${id}:`, error);
