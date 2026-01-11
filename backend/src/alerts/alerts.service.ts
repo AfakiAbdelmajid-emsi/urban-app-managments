@@ -1,18 +1,24 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Alert, AlertDocument } from './schemas/alert.schema';
 import { CreateAlertDto } from './dto/create-alert.dto';
 import { AlertsGateway } from './alerts.gateway';
 import { CloudinaryService } from '../utils/cloudinary.service';
+import { UsersService } from '../users/users.service';
+import { User, UserDocument } from '../users/schemas/user.schema';
 
 @Injectable()
 export class AlertsService {
   constructor(
     @InjectModel(Alert.name)
     private readonly alertModel: Model<AlertDocument>,
+    @InjectModel(User.name)
+    private readonly userModel: Model<UserDocument>,
     private readonly alertsGateway: AlertsGateway,
     private readonly cloudinaryService: CloudinaryService,
+    @Inject(forwardRef(() => UsersService))
+    private readonly usersService: UsersService,
   ) {}
 
   // 🔴 CREATE - Crash-proof with validation
@@ -33,7 +39,12 @@ export class AlertsService {
         userId,
         confirmations: 0,
         denials: 0,
-        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+        confidenceScore: 0,
+        confirmedBy: [],
+        deniedBy: [],
+        verified: false,
+        status: 'ACTIVE',
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000), // 1 hour expiry
       }).save();
 
       // Emit event safely (won't crash if gateway fails)
@@ -223,6 +234,11 @@ export class AlertsService {
           photo: alert.photo || undefined,
           confirmations: typeof alert.confirmations === 'number' ? alert.confirmations : 0,
           denials: typeof alert.denials === 'number' ? alert.denials : 0,
+          confidenceScore: typeof alert.confidenceScore === 'number' ? alert.confidenceScore : 0,
+          confirmedBy: Array.isArray(alert.confirmedBy) ? alert.confirmedBy.map((id: any) => id?.toString() || id) : [],
+          deniedBy: Array.isArray(alert.deniedBy) ? alert.deniedBy.map((id: any) => id?.toString() || id) : [],
+          verified: typeof alert.verified === 'boolean' ? alert.verified : false,
+          status: alert.status || 'ACTIVE',
           createdAt: alert.createdAt || new Date(),
           expiresAt: alert.expiresAt || undefined,
           roadName: alert.roadName || undefined,
@@ -253,54 +269,257 @@ export class AlertsService {
     }
   }
 
-  // 👍 CONFIRM - Crash-proof
-  async confirmAlert(id: string): Promise<any> {
+  // Calculate confidence score based on confirming users' trust scores minus denials
+  private async calculateConfidenceScore(alert: any): Promise<number> {
+    try {
+      let confidence = 0;
+
+      // Sum trust scores of all confirming users
+      for (const userId of alert.confirmedBy || []) {
+        try {
+          const user = await this.usersService.getUser(userId);
+          confidence += user.trustScore || 1.0;
+        } catch (error) {
+          console.warn(`⚠️ [CONFIDENCE] Could not get trust score for user ${userId}, using default 1.0`);
+          confidence += 1.0;
+        }
+      }
+
+      // Subtract denials (simple count)
+      confidence -= (alert.denials || 0);
+
+      return Math.round(confidence * 10) / 10; // Round to 1 decimal place
+    } catch (error) {
+      console.error('❌ [CONFIDENCE] Error calculating confidence score:', error);
+      return 0;
+    }
+  }
+
+  // Check and update alert state based on confidence score
+  private async updateAlertState(alertId: string, confidenceScore: number): Promise<'ACTIVE' | 'VERIFIED' | 'REJECTED' | 'EXPIRED'> {
+    const alert = await this.alertModel.findById(alertId).lean();
+    if (!alert) return 'ACTIVE';
+
+    // Check if expired first (expired alerts can't change status)
+    if (alert.expiresAt && new Date(alert.expiresAt) < new Date()) {
+      if (alert.status !== 'EXPIRED') {
+        await this.alertModel.findByIdAndUpdate(alertId, { status: 'EXPIRED' });
+      }
+      return 'EXPIRED';
+    }
+
+    // Don't change status if already in final state (unless expired)
+    if (alert.status === 'VERIFIED' || alert.status === 'REJECTED') {
+      return alert.status as 'VERIFIED' | 'REJECTED';
+    }
+
+    let newStatus: 'ACTIVE' | 'VERIFIED' | 'REJECTED' = 'ACTIVE';
+
+    if (confidenceScore >= 5) {
+      newStatus = 'VERIFIED';
+    } else if (confidenceScore <= -3) {
+      newStatus = 'REJECTED';
+    } else {
+      newStatus = 'ACTIVE';
+    }
+
+    // Update alert status if changed
+    if (newStatus !== alert.status) {
+      await this.alertModel.findByIdAndUpdate(alertId, {
+        status: newStatus,
+        verified: newStatus === 'VERIFIED',
+      });
+    }
+
+    return newStatus;
+  }
+
+  // Update creator's trust score when alert reaches final state
+  private async updateCreatorTrustScore(alert: any, finalStatus: 'VERIFIED' | 'REJECTED' | 'EXPIRED'): Promise<void> {
+    try {
+      if (!alert.userId) return;
+
+      const user = await this.usersService.getUser(alert.userId);
+      let newTrustScore = user.trustScore || 1.0;
+
+      if (finalStatus === 'VERIFIED') {
+        newTrustScore += 0.1;
+        console.log(`📈 [TRUST] User ${alert.userId} trust increased: ${user.trustScore} → ${newTrustScore}`);
+      } else if (finalStatus === 'REJECTED') {
+        newTrustScore -= 0.2;
+        console.log(`📉 [TRUST] User ${alert.userId} trust decreased: ${user.trustScore} → ${newTrustScore}`);
+      }
+      // EXPIRED: no change to trust score
+
+      // Clamp between 0.1 and 5.0
+      newTrustScore = Math.max(0.1, Math.min(5.0, newTrustScore));
+
+      // Update user trust score
+      await this.userModel.findByIdAndUpdate(alert.userId, { trustScore: newTrustScore });
+    } catch (error) {
+      console.error('❌ [TRUST] Error updating creator trust score:', error);
+      // Don't throw - trust update failure shouldn't break the flow
+    }
+  }
+
+  // 👍 CONFIRM - With Trust System
+  async confirmAlert(id: string, voterId: string): Promise<any> {
     try {
       if (!id || typeof id !== 'string') {
         throw new NotFoundException('Invalid alert ID');
       }
 
-      const alert = await this.alertModel.findByIdAndUpdate(
-        id,
-        { $inc: { confirmations: 1 } },
-        { new: true, lean: true },
-      );
+      if (!voterId || typeof voterId !== 'string') {
+        throw new BadRequestException('Voter ID is required');
+      }
 
+      // Get alert
+      const alert = await this.alertModel.findById(id);
       if (!alert) throw new NotFoundException('Alert not found');
 
-      this.alertsGateway.emitAlertConfirmed(alert).catch((error) => {
+      // Check if user is the creator
+      if (alert.userId === voterId) {
+        throw new BadRequestException('You cannot vote on your own alert');
+      }
+
+      // Check if user already voted
+      if (alert.confirmedBy.includes(voterId)) {
+        throw new BadRequestException('You have already confirmed this alert');
+      }
+
+      // Remove from deniedBy if they previously denied
+      if (alert.deniedBy.includes(voterId)) {
+        alert.deniedBy = alert.deniedBy.filter((id: string) => id !== voterId);
+        alert.denials = Math.max(0, alert.denials - 1);
+      }
+
+      // Add to confirmedBy
+      alert.confirmedBy.push(voterId);
+      alert.confirmations = alert.confirmedBy.length;
+
+      // Recalculate confidence score
+      const oldStatus = alert.status;
+      alert.confidenceScore = await this.calculateConfidenceScore(alert);
+
+      // Save alert
+      await alert.save();
+
+      // Check state transitions
+      const newStatus = await this.updateAlertState(id, alert.confidenceScore);
+
+      // Reload alert with updated status
+      const updatedAlert = await this.alertModel.findById(id).lean();
+
+      // If status changed to final state, update creator trust score (only once)
+      if (oldStatus === 'ACTIVE' && (newStatus === 'VERIFIED' || newStatus === 'REJECTED')) {
+        await this.updateCreatorTrustScore(updatedAlert, newStatus);
+      }
+
+      // Emit events
+      this.alertsGateway.emitAlertConfirmed(updatedAlert).catch((error) => {
         console.error('❌ [CONFIRM] Error emitting alert_confirmed event:', error);
       });
 
-      console.log(`✅ [CONFIRM] Alert ${id} confirmed`);
-      return alert;
+      if (newStatus !== oldStatus) {
+        if (newStatus === 'VERIFIED') {
+          this.alertsGateway.emitAlertVerified(updatedAlert).catch((error) => {
+            console.error('❌ [CONFIRM] Error emitting alert_verified event:', error);
+          });
+        } else if (newStatus === 'REJECTED') {
+          this.alertsGateway.emitAlertRejected(updatedAlert).catch((error) => {
+            console.error('❌ [CONFIRM] Error emitting alert_rejected event:', error);
+          });
+        }
+      }
+
+      this.alertsGateway.emitConfidenceUpdated(updatedAlert).catch((error) => {
+        console.error('❌ [CONFIRM] Error emitting confidence_updated event:', error);
+      });
+
+      console.log(`✅ [CONFIRM] Alert ${id} confirmed by user ${voterId}. Confidence: ${alert.confidenceScore}, Status: ${newStatus}`);
+      return updatedAlert;
     } catch (error) {
       console.error(`❌ [CONFIRM] Error confirming alert ${id}:`, error);
       throw error;
     }
   }
 
-  // 👎 DENY - Crash-proof
-  async denyAlert(id: string): Promise<any> {
+  // 👎 DENY - With Trust System
+  async denyAlert(id: string, voterId: string): Promise<any> {
     try {
       if (!id || typeof id !== 'string') {
         throw new NotFoundException('Invalid alert ID');
       }
 
-      const alert = await this.alertModel.findByIdAndUpdate(
-        id,
-        { $inc: { denials: 1 } },
-        { new: true, lean: true },
-      );
+      if (!voterId || typeof voterId !== 'string') {
+        throw new BadRequestException('Voter ID is required');
+      }
 
+      // Get alert
+      const alert = await this.alertModel.findById(id);
       if (!alert) throw new NotFoundException('Alert not found');
 
-      this.alertsGateway.emitAlertDenied(alert).catch((error) => {
+      // Check if user is the creator
+      if (alert.userId === voterId) {
+        throw new BadRequestException('You cannot vote on your own alert');
+      }
+
+      // Check if user already voted
+      if (alert.deniedBy.includes(voterId)) {
+        throw new BadRequestException('You have already denied this alert');
+      }
+
+      // Remove from confirmedBy if they previously confirmed
+      if (alert.confirmedBy.includes(voterId)) {
+        alert.confirmedBy = alert.confirmedBy.filter((id: string) => id !== voterId);
+        alert.confirmations = Math.max(0, alert.confirmations - 1);
+      }
+
+      // Add to deniedBy
+      alert.deniedBy.push(voterId);
+      alert.denials = alert.deniedBy.length;
+
+      // Recalculate confidence score
+      const oldStatus = alert.status;
+      alert.confidenceScore = await this.calculateConfidenceScore(alert);
+
+      // Save alert
+      await alert.save();
+
+      // Check state transitions
+      const newStatus = await this.updateAlertState(id, alert.confidenceScore);
+
+      // Reload alert with updated status
+      const updatedAlert = await this.alertModel.findById(id).lean();
+
+      // If status changed to final state, update creator trust score (only once)
+      if (oldStatus === 'ACTIVE' && (newStatus === 'VERIFIED' || newStatus === 'REJECTED')) {
+        await this.updateCreatorTrustScore(updatedAlert, newStatus);
+      }
+
+      // Emit events
+      this.alertsGateway.emitAlertDenied(updatedAlert).catch((error) => {
         console.error('❌ [DENY] Error emitting alert_denied event:', error);
       });
 
-      console.log(`✅ [DENY] Alert ${id} denied`);
-      return alert;
+      if (newStatus !== oldStatus) {
+        if (newStatus === 'VERIFIED') {
+          this.alertsGateway.emitAlertVerified(updatedAlert).catch((error) => {
+            console.error('❌ [DENY] Error emitting alert_verified event:', error);
+          });
+        } else if (newStatus === 'REJECTED') {
+          this.alertsGateway.emitAlertRejected(updatedAlert).catch((error) => {
+            console.error('❌ [DENY] Error emitting alert_rejected event:', error);
+          });
+        }
+      }
+
+      this.alertsGateway.emitConfidenceUpdated(updatedAlert).catch((error) => {
+        console.error('❌ [DENY] Error emitting confidence_updated event:', error);
+      });
+
+      console.log(`✅ [DENY] Alert ${id} denied by user ${voterId}. Confidence: ${alert.confidenceScore}, Status: ${newStatus}`);
+      return updatedAlert;
     } catch (error) {
       console.error(`❌ [DENY] Error denying alert ${id}:`, error);
       throw error;

@@ -19,6 +19,9 @@ export class User {
   @Prop()
   profileImage?: string;
 
+  @Prop({ default: 1.0, min: 0.1, max: 5.0 })
+  trustScore!: number;
+
   @Prop({ default: Date.now })
   createdAt!: Date;
 }

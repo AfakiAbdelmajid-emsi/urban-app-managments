@@ -164,15 +164,15 @@ export class AlertsController {
   // 👍 CONFIRM ALERT (JWT)
   @UseGuards(JwtGuard)
   @Post(':id/confirm')
-  confirm(@Param('id') id: string) {
-    return this.alertsService.confirmAlert(id);
+  confirm(@Param('id') id: string, @Req() req: authRequest.AuthRequest) {
+    return this.alertsService.confirmAlert(id, req.user.userId);
   }
 
   // 👎 DENY ALERT (JWT)
   @UseGuards(JwtGuard)
   @Post(':id/deny')
-  deny(@Param('id') id: string) {
-    return this.alertsService.denyAlert(id);
+  deny(@Param('id') id: string, @Req() req: authRequest.AuthRequest) {
+    return this.alertsService.denyAlert(id, req.user.userId);
   }
 
   // 🗑️ DELETE ALERT (JWT)

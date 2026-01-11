@@ -17,7 +17,7 @@ const DEFAULT_LOCAL_URL = 'http://localhost:3001';
 // Get backend URL from environment variable, fallback to Railway
 export const BACKEND_URL = 
   process.env.NEXT_PUBLIC_BACKEND_URL || 
-  DEFAULT_LOCAL_URL;
+  DEFAULT_RAILWAY_URL;
 
 // Socket URL uses the same backend URL (same server)
 export const SOCKET_URL = BACKEND_URL;

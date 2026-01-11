@@ -37,6 +37,25 @@ export class Alert {
   @Prop({ default: 0 })
   denials!: number;
 
+  @Prop({ default: 0 })
+  confidenceScore!: number;
+
+  @Prop({ type: [String], default: [] })
+  confirmedBy!: string[];
+
+  @Prop({ type: [String], default: [] })
+  deniedBy!: string[];
+
+  @Prop({ default: false })
+  verified!: boolean;
+
+  @Prop({
+    type: String,
+    enum: ['ACTIVE', 'VERIFIED', 'REJECTED', 'EXPIRED'],
+    default: 'ACTIVE',
+  })
+  status!: 'ACTIVE' | 'VERIFIED' | 'REJECTED' | 'EXPIRED';
+
   @Prop({ default: Date.now })
   createdAt!: Date;
 

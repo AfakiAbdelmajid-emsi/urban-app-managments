@@ -10,6 +10,11 @@ export interface Alert {
   photo?: string;
   confirmations: number;
   denials: number;
+  confidenceScore: number;
+  confirmedBy: string[];
+  deniedBy: string[];
+  verified: boolean;
+  status: 'ACTIVE' | 'VERIFIED' | 'REJECTED' | 'EXPIRED';
   createdAt: string;
   expiresAt?: string;
 }

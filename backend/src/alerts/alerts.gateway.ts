@@ -178,6 +178,66 @@ export class AlertsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
   }
 
+  emitConfidenceUpdated(alert: any): Promise<void> {
+    return new Promise((resolve) => {
+      try {
+        if (!this.server || !alert) {
+          console.warn('⚠️ [GATEWAY] Cannot emit confidence_updated: server or alert missing');
+          resolve();
+          return;
+        }
+
+        const safeAlert = this.sanitizeAlertForEmission(alert);
+        this.server.emit('alert_confidence_updated', safeAlert);
+        console.log(`✅ [GATEWAY] Emitted confidence_updated: ${safeAlert._id || 'unknown'} (score: ${safeAlert.confidenceScore})`);
+        resolve();
+      } catch (error) {
+        console.error('❌ [GATEWAY] Error emitting confidence_updated:', error);
+        resolve();
+      }
+    });
+  }
+
+  emitAlertVerified(alert: any): Promise<void> {
+    return new Promise((resolve) => {
+      try {
+        if (!this.server || !alert) {
+          console.warn('⚠️ [GATEWAY] Cannot emit alert_verified: server or alert missing');
+          resolve();
+          return;
+        }
+
+        const safeAlert = this.sanitizeAlertForEmission(alert);
+        this.server.emit('alert_verified', safeAlert);
+        console.log(`✅ [GATEWAY] Emitted alert_verified: ${safeAlert._id || 'unknown'}`);
+        resolve();
+      } catch (error) {
+        console.error('❌ [GATEWAY] Error emitting alert_verified:', error);
+        resolve();
+      }
+    });
+  }
+
+  emitAlertRejected(alert: any): Promise<void> {
+    return new Promise((resolve) => {
+      try {
+        if (!this.server || !alert) {
+          console.warn('⚠️ [GATEWAY] Cannot emit alert_rejected: server or alert missing');
+          resolve();
+          return;
+        }
+
+        const safeAlert = this.sanitizeAlertForEmission(alert);
+        this.server.emit('alert_rejected', safeAlert);
+        console.log(`✅ [GATEWAY] Emitted alert_rejected: ${safeAlert._id || 'unknown'}`);
+        resolve();
+      } catch (error) {
+        console.error('❌ [GATEWAY] Error emitting alert_rejected:', error);
+        resolve();
+      }
+    });
+  }
+
   // Sanitize alert data before emitting to prevent crashes
   private sanitizeAlertForEmission(alert: any): any {
     try {
@@ -191,8 +251,13 @@ export class AlertsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         photo: typeof alert.photo === 'string' ? alert.photo : undefined,
         confirmations: typeof alert.confirmations === 'number' ? alert.confirmations : 0,
         denials: typeof alert.denials === 'number' ? alert.denials : 0,
-        createdAt: alert.createdAt || new Date().toISOString(),
-        expiresAt: alert.expiresAt ? new Date(alert.expiresAt).toISOString() : undefined,
+        confidenceScore: typeof alert.confidenceScore === 'number' ? alert.confidenceScore : 0,
+        confirmedBy: Array.isArray(alert.confirmedBy) ? alert.confirmedBy.map((id: any) => id?.toString() || id) : [],
+        deniedBy: Array.isArray(alert.deniedBy) ? alert.deniedBy.map((id: any) => id?.toString() || id) : [],
+        verified: typeof alert.verified === 'boolean' ? alert.verified : false,
+        status: alert.status || 'ACTIVE',
+        createdAt: alert.createdAt ? (typeof alert.createdAt === 'string' ? alert.createdAt : new Date(alert.createdAt).toISOString()) : new Date().toISOString(),
+        expiresAt: alert.expiresAt ? (typeof alert.expiresAt === 'string' ? alert.expiresAt : new Date(alert.expiresAt).toISOString()) : undefined,
         roadName: typeof alert.roadName === 'string' ? alert.roadName : undefined,
         fullAddress: typeof alert.fullAddress === 'string' ? alert.fullAddress : undefined,
       };
@@ -205,6 +270,9 @@ export class AlertsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         longitude: 0,
         confirmations: 0,
         denials: 0,
+        confidenceScore: 0,
+        verified: false,
+        status: 'ACTIVE',
         createdAt: new Date().toISOString(),
       };
     }
