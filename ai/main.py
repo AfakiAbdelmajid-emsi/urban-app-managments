@@ -143,7 +143,7 @@ def ask_ai(data: AskRequest):
         )
 
     payload = {
-        "model": "mistralai/Mistral-7B-Instruct-v0.2",
+        "model": "HuggingFaceH4/zephyr-7b-beta",
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": data.message}
