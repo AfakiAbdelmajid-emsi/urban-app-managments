@@ -143,14 +143,15 @@ def ask_ai(data: AskRequest):
         )
 
     payload = {
-        "model": "HuggingFaceH4/zephyr-7b-beta",
+        "model": "meta-llama/Llama-3.1-8B-Instruct",  # or "omni"
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": data.message}
         ],
         "temperature": 0.6,
-        "max_tokens": 200
+        "max_tokens": 400,
     }
+
 
     response = requests.post(
         "https://router.huggingface.co/v1/chat/completions",
