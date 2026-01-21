@@ -7,6 +7,7 @@ import requests
 from models.chat import chat_collection
 import os
 
+app = FastAPI()
 
 HF_API_KEY = os.getenv("HF_API_KEY")
 HF_MODEL_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2"
