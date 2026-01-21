@@ -142,26 +142,22 @@ def ask_ai(data: AskRequest):
             detail="HF_API_KEY not configured"
         )
 
-    # 🔹 Simple prompt (no history)
-    prompt = f"""
-{SYSTEM_PROMPT}
-
-User: {data.message}
-AI:
-"""
-
     payload = {
-        "inputs": prompt,
-        "parameters": {
-            "max_new_tokens": 200,
-            "temperature": 0.6,
-            "return_full_text": False
-        }
+        "model": "mistralai/Mistral-7B-Instruct-v0.2",
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": data.message}
+        ],
+        "temperature": 0.6,
+        "max_tokens": 200
     }
 
     response = requests.post(
-        HF_MODEL_URL,
-        headers=HEADERS,
+        "https://router.huggingface.co/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {HF_API_KEY}",
+            "Content-Type": "application/json"
+        },
         json=payload,
         timeout=60
     )
@@ -177,18 +173,12 @@ AI:
             detail="Invalid JSON from Hugging Face"
         )
 
-    if isinstance(result, dict) and "error" in result:
+    if "error" in result:
         raise HTTPException(
             status_code=503,
-            detail=result["error"]
+            detail=result["error"].get("message", "HF error")
         )
 
-    if isinstance(result, list) and "generated_text" in result[0]:
-        return {
-            "answer": result[0]["generated_text"]
-        }
-
-    raise HTTPException(
-        status_code=500,
-        detail=f"Unexpected HF response: {result}"
-    )
+    return {
+        "answer": result["choices"][0]["message"]["content"]
+    }
