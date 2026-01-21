@@ -132,49 +132,63 @@ def build_prompt(user_id: str, user_message: str) -> str:
     prompt += f"User: {user_message}\nAI:"
 
     return prompt
-
 @app.post("/ask")
 def ask_ai(data: AskRequest):
     print("HF_API_KEY present:", bool(HF_API_KEY))
 
     if not HF_API_KEY:
-        raise HTTPException(status_code=500, detail="HF_API_KEY not configured")
+        raise HTTPException(
+            status_code=500,
+            detail="HF_API_KEY not configured"
+        )
 
-    prompt = build_prompt(data.userId, data.message)
+    # 🔹 Simple prompt (no history)
+    prompt = f"""
+{SYSTEM_PROMPT}
+
+User: {data.message}
+AI:
+"""
 
     payload = {
         "inputs": prompt,
         "parameters": {
-            "max_new_tokens": 400,
+            "max_new_tokens": 200,
             "temperature": 0.6,
             "return_full_text": False
         }
     }
 
+    response = requests.post(
+        HF_MODEL_URL,
+        headers=HEADERS,
+        json=payload,
+        timeout=60
+    )
+
+    print("HF STATUS:", response.status_code)
+    print("HF RAW:", response.text)
+
     try:
-        response = requests.post(
-            HF_MODEL_URL,
-            headers=HEADERS,
-            json=payload,
-            timeout=60
-        )
         result = response.json()
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Invalid JSON from Hugging Face"
+        )
 
-        if isinstance(result, dict) and "error" in result:
-            print("HF ERROR:", result)
-            raise HTTPException(status_code=503, detail=result["error"])
+    if isinstance(result, dict) and "error" in result:
+        raise HTTPException(
+            status_code=503,
+            detail=result["error"]
+        )
 
-        if isinstance(result, list) and "generated_text" in result[0]:
-            answer = result[0]["generated_text"]
-        else:
-            raise HTTPException(status_code=500, detail="Invalid HF response format")
+    if isinstance(result, list) and "generated_text" in result[0]:
+        return {
+            "answer": result[0]["generated_text"]
+        }
 
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-    # Save conversation
-    save_message(data.userId, "user", data.message)
-    save_message(data.userId, "assistant", answer)
-
-    return {"answer": answer}
+    raise HTTPException(
+        status_code=500,
+        detail=f"Unexpected HF response: {result}"
+    )
