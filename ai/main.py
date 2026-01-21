@@ -131,6 +131,8 @@ def build_prompt(user_id: str, user_message: str) -> str:
 
 @app.post("/ask")
 def ask_ai(data: AskRequest):
+    print("HF_API_KEY present:", bool(HF_API_KEY))
+
     if not HF_API_KEY:
         raise HTTPException(status_code=500, detail="HF_API_KEY not configured")
 
@@ -154,11 +156,15 @@ def ask_ai(data: AskRequest):
         )
         result = response.json()
 
-        # Hugging Face returns a list with generated_text
+        if isinstance(result, dict) and "error" in result:
+            print("HF ERROR:", result)
+            raise HTTPException(status_code=503, detail=result["error"])
+
         if isinstance(result, list) and "generated_text" in result[0]:
             answer = result[0]["generated_text"]
         else:
-            answer = str(result)
+            raise HTTPException(status_code=500, detail="Invalid HF response format")
+
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
