@@ -4,7 +4,7 @@ from datetime import datetime
 from fastapi import FastAPI,HTTPException
 from pydantic import BaseModel
 import requests
-from models.chat import chat_collection
+from models.chat import get_chat_collection
 import os
 
 app = FastAPI()
@@ -102,13 +102,13 @@ class AskRequest(BaseModel):
     userId: str
     message: str
 def load_history(user_id: str, limit: int = 10):
-    messages = chat_collection.find(
+    messages = get_chat_collection.find(
         {"userId": user_id}
     ).sort("createdAt", 1).limit(limit)
 
     return list(messages)
 def save_message(user_id: str, role: str, content: str):
-    chat_collection.insert_one({
+    get_chat_collection.insert_one({
         "userId": user_id,
         "role": role,
         "content": content,

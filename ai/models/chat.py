@@ -1,13 +1,15 @@
 from pymongo import MongoClient
-from datetime import datetime
 import os
 
+def get_chat_collection():
+    mongodb_uri = os.getenv("MONGODB_URI")
+    if not mongodb_uri:
+        raise RuntimeError("MONGODB_URI not set")
 
-MONGODB_URI=os.getenv("MONGODB_URI")
+    client = MongoClient(
+        mongodb_uri,
+        serverSelectionTimeoutMS=5000
+    )
 
-if not MONGODB_URI:
-    raise RuntimeError("MONGODB_URI not loaded")
-
-client = MongoClient(MONGODB_URI)
-db = client["test"]
-chat_collection = db["chat_messages"]
+    db = client["test"]
+    return db["chat_messages"]
