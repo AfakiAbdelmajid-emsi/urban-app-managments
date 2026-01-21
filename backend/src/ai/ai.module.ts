@@ -5,7 +5,7 @@ import { AiController } from './ai.controller';
 @Module({
   imports: [
     HttpModule.register({
-      baseURL: 'http://localhost:8001',
+      baseURL: 'peaceful-happiness-production-959b.up.railway.app',
       timeout: 60_000,
     }),
   ],
