@@ -197,3 +197,6 @@ PORT=3001
 - Visual feedback shows connection status in UI
 
 
+
+
+

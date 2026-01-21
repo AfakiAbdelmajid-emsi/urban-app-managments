@@ -1,0 +1,738 @@
+@startuml Use_Case_Diagram
+
+title Urban Alert Management System - Use Case Diagram
+
+' Actors
+actor "Authenticated User" as AuthUser
+actor "Anonymous User" as AnonUser
+actor "System" as System
+actor "AI Service" as AI
+actor "Cloudinary" as Cloud
+
+' Use Cases - Authentication
+rectangle "Authentication" {
+  usecase (Register) as UC1
+  usecase (Login) as UC2
+}
+
+' Use Cases - Alert Management
+rectangle "Alert Management" {
+  usecase (Create Alert) as UC3
+  usecase (View Alerts) as UC4
+  usecase (Filter by Distance) as UC5
+  usecase (Confirm Alert) as UC6
+  usecase (Deny Alert) as UC7
+  usecase (Delete Alert) as UC8
+  usecase (Upload Photo) as UC9
+}
+
+' Use Cases - AI Assistant
+rectangle "AI Assistant" {
+  usecase (Ask AI Question) as UC10
+  usecase (View Chat History) as UC11
+}
+
+' Use Cases - Real-time Updates
+rectangle "Real-time Communication" {
+  usecase (Connect WebSocket) as UC12
+  usecase (Receive Updates) as UC13
+}
+
+' Use Cases - System Automated
+rectangle "Automated System Functions" {
+  usecase (Calculate Confidence) as UC14
+  usecase (Update Alert Status) as UC15
+  usecase (Update Trust Score) as UC16
+  usecase (Detect Duplicates) as UC17
+  usecase (Validate Coordinates) as UC18
+}
+
+' Relationships - Authenticated User
+AuthUser --> UC1
+AuthUser --> UC2
+AuthUser --> UC3
+AuthUser --> UC4
+AuthUser --> UC5
+AuthUser --> UC6
+AuthUser --> UC7
+AuthUser --> UC8
+AuthUser --> UC10
+AuthUser --> UC11
+AuthUser --> UC12
+
+' Relationships - Anonymous User
+AnonUser --> UC4
+AnonUser --> UC5
+AnonUser --> UC12
+
+' Include/Extend Relationships
+UC3 ..> UC9 : <<include>>
+UC3 ..> UC17 : <<include>>
+UC3 ..> UC18 : <<include>>
+UC6 ..> UC14 : <<include>>
+UC7 ..> UC14 : <<include>>
+UC14 ..> UC15 : <<include>>
+UC15 ..> UC16 : <<extend>>
+
+' System relationships
+System --> UC14
+System --> UC15
+System --> UC16
+System --> UC17
+System --> UC18
+
+' External services
+UC9 --> Cloud
+UC10 --> AI
+
+' WebSocket
+UC12 --> UC13 : <<include>>
+
+@enduml
+
+' ========================================
+@startuml Sequence_Create_Alert
+
+title Sequence Diagram - Create Alert with Duplicate Detection
+
+actor "User" as User
+participant "AlertController" as Controller
+participant "CloudinaryService" as Cloudinary
+participant "AlertsService" as Service
+database "MongoDB" as DB
+participant "AlertsGateway" as Gateway
+participant "WebSocket Clients" as Clients
+
+User -> Controller: POST /alerts\n(photo, type, lat, lon, description)
+activate Controller
+
+Controller -> Controller: Validate FormData\nParse coordinates
+
+alt Photo provided
+  Controller -> Cloudinary: uploadImage(file)
+  activate Cloudinary
+  Cloudinary --> Controller: imageUrl
+  deactivate Cloudinary
+end
+
+Controller -> Service: createAlert(userId, dto)
+activate Service
+
+Service -> Service: validateCoordinates(lat, lon)
+
+Service -> Service: findDuplicateAlert(type, lat, lon)
+activate Service
+
+Service -> DB: Find alerts\n(same type, <100m, <10min)
+activate DB
+DB --> Service: recentAlerts[]
+deactivate DB
+
+alt Duplicate Found
+  Service -> Service: calculateDistanceInKilometers()
+  Service --> Service: duplicateAlert
+  
+  Service -> Service: Add user to confirmedBy
+  Service -> Service: confirmations++
+  Service -> Service: calculateConfidenceScore()
+  Service -> Service: updateAlertState()
+  
+  Service -> DB: save(duplicateAlert)
+  activate DB
+  DB --> Service: updatedAlert
+  deactivate DB
+  
+  Service -> Gateway: emitAlertConfirmed(alert)
+  activate Gateway
+  Gateway -> Clients: broadcast "alert_confirmed"
+  deactivate Gateway
+  
+  alt Status changed to VERIFIED
+    Service -> Service: updateCreatorTrustScore(+0.1)
+    Service -> Gateway: emitAlertVerified(alert)
+    activate Gateway
+    Gateway -> Clients: broadcast "alert_verified"
+    deactivate Gateway
+  end
+  
+  Service --> Controller: updatedAlert
+  
+else No Duplicate
+  Service -> DB: create new Alert\n(status: ACTIVE)
+  activate DB
+  DB --> Service: newAlert
+  deactivate DB
+  
+  Service -> Gateway: emitAlertCreated(alert)
+  activate Gateway
+  Gateway -> Clients: broadcast "alert_created"
+  deactivate Gateway
+  
+  Service --> Controller: newAlert
+end
+
+deactivate Service
+
+Controller --> User: 200 OK\nalert data
+deactivate Controller
+
+@enduml
+
+' ========================================
+@startuml Sequence_Confirm_Alert
+
+title Sequence Diagram - Confirm Alert (Trust System)
+
+actor "User" as User
+participant "AlertController" as Controller
+participant "AlertsService" as Service
+participant "UsersService" as UserService
+database "MongoDB" as DB
+participant "AlertsGateway" as Gateway
+participant "WebSocket Clients" as Clients
+
+User -> Controller: POST /alerts/:id/confirm
+activate Controller
+
+Controller -> Service: confirmAlert(id, voterId)
+activate Service
+
+Service -> DB: findById(id)
+activate DB
+DB --> Service: alert
+deactivate DB
+
+Service -> Service: Check if user is creator
+note right: Throw error if true
+
+Service -> Service: Check if already confirmed
+note right: Throw error if true
+
+alt Previously denied
+  Service -> Service: Remove from deniedBy\ndenials--
+end
+
+Service -> Service: Add to confirmedBy\nconfirmations++
+
+Service -> Service: calculateConfidenceScore()
+activate Service
+
+loop For each user in confirmedBy
+  Service -> UserService: getUser(userId)
+  activate UserService
+  UserService -> DB: findById(userId)
+  DB --> UserService: user
+  UserService --> Service: user.trustScore
+  deactivate UserService
+  Service -> Service: confidence += trustScore
+end
+
+Service -> Service: confidence -= denials
+Service --> Service: confidenceScore
+deactivate Service
+
+Service -> DB: save(alert)
+activate DB
+DB --> Service: savedAlert
+deactivate DB
+
+Service -> Service: updateAlertState(id, confidence)
+activate Service
+
+alt confirmations >= 3
+  Service -> DB: Update status to VERIFIED
+  Service --> Service: newStatus = VERIFIED
+else confidence <= -3
+  Service -> DB: Update status to REJECTED
+  Service --> Service: newStatus = REJECTED
+else
+  Service --> Service: newStatus = ACTIVE
+end
+
+deactivate Service
+
+alt Status changed to VERIFIED
+  Service -> Service: updateCreatorTrustScore(+0.1)
+  activate Service
+  Service -> DB: Update creator.trustScore += 0.1
+  deactivate Service
+  
+  Service -> Gateway: emitAlertVerified(alert)
+  activate Gateway
+  Gateway -> Clients: broadcast "alert_verified"
+  deactivate Gateway
+end
+
+alt Status changed to REJECTED
+  Service -> Service: updateCreatorTrustScore(-0.2)
+  activate Service
+  Service -> DB: Update creator.trustScore -= 0.2
+  deactivate Service
+  
+  Service -> Gateway: emitAlertRejected(alert)
+  activate Gateway
+  Gateway -> Clients: broadcast "alert_rejected"
+  deactivate Gateway
+end
+
+Service -> Gateway: emitAlertConfirmed(alert)
+activate Gateway
+Gateway -> Clients: broadcast "alert_confirmed"
+deactivate Gateway
+
+Service -> Gateway: emitConfidenceUpdated(alert)
+activate Gateway
+Gateway -> Clients: broadcast "alert_confidence_updated"
+deactivate Gateway
+
+Service --> Controller: updatedAlert
+deactivate Service
+
+Controller --> User: 200 OK\nupdated alert
+deactivate Controller
+
+@enduml
+
+' ========================================
+@startuml Sequence_AI_Chat
+
+title Sequence Diagram - AI Vehicle Assistance
+
+actor "User" as User
+participant "AiController" as Controller
+participant "Python AI Service" as AI
+participant "Ollama (Llama3)" as Ollama
+database "MongoDB" as DB
+
+User -> Controller: POST /ai/ask\n(message)
+activate Controller
+
+Controller -> AI: POST /ask\n(userId, message)
+activate AI
+
+AI -> DB: Load chat history\n(last 10 messages)
+activate DB
+DB --> AI: messages[]
+deactivate DB
+
+AI -> AI: build_prompt()\nSYSTEM_PROMPT + history + new message
+
+AI -> Ollama: POST /api/generate\n(model: llama3:8b, prompt)
+activate Ollama
+Ollama --> AI: response
+deactivate Ollama
+
+AI -> DB: save_message(user, message)
+activate DB
+deactivate DB
+
+AI -> DB: save_message(assistant, answer)
+activate DB
+deactivate DB
+
+AI --> Controller: { answer }
+deactivate AI
+
+Controller --> User: 200 OK\n{ answer }
+deactivate Controller
+
+@enduml
+
+' ========================================
+@startuml State_Diagram_Alert
+
+title Alert Status State Diagram
+
+[*] --> ACTIVE : Alert Created
+
+ACTIVE --> VERIFIED : confirmations >= 3
+ACTIVE --> REJECTED : confidence <= -3
+ACTIVE --> EXPIRED : 1 hour passed
+
+VERIFIED --> [*]
+REJECTED --> [*]
+EXPIRED --> [*]
+
+note right of ACTIVE
+  Default state when alert is created
+  - Can receive confirmations/denials
+  - Confidence score changes
+  - Can be deleted by creator
+end note
+
+note right of VERIFIED
+  Final state (no changes)
+  - Alert is legitimate
+  - Creator trust score +0.1
+  - Visible with verified badge
+end note
+
+note right of REJECTED
+  Final state (no changes)
+  - Alert is false/spam
+  - Creator trust score -0.2
+  - Hidden from map
+end note
+
+note right of EXPIRED
+  Final state (no changes)
+  - 1 hour timeout
+  - No trust score change
+  - Auto-cleanup eligible
+end note
+
+@enduml
+
+' ========================================
+@startuml Class_Diagram
+
+title Class Diagram - Core Domain Models
+
+class User {
+  +_id: ObjectId
+  +email: string
+  +password: string (hashed)
+  +name?: string
+  +trustScore: number
+  +createdAt: Date
+  --
+  +getTrustScore(): number
+  +updateTrustScore(delta: number): void
+}
+
+class Alert {
+  +_id: ObjectId
+  +userId: string
+  +type: AlertType
+  +description?: string
+  +latitude: number
+  +longitude: number
+  +photo?: string
+  +roadName?: string
+  +fullAddress?: string
+  +confirmations: number
+  +denials: number
+  +confidenceScore: number
+  +confirmedBy: string[]
+  +deniedBy: string[]
+  +verified: boolean
+  +status: AlertStatus
+  +createdAt: Date
+  +expiresAt: Date
+  --
+  +calculateConfidence(): number
+  +updateStatus(): AlertStatus
+  +isExpired(): boolean
+}
+
+enum AlertType {
+  ACCIDENT
+  ROADWORK
+  TRAFFIC
+  HAZARD
+  OTHER
+}
+
+enum AlertStatus {
+  ACTIVE
+  VERIFIED
+  REJECTED
+  EXPIRED
+}
+
+class ChatMessage {
+  +_id: ObjectId
+  +userId: string
+  +role: MessageRole
+  +content: string
+  +createdAt: Date
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+}
+
+class AuthService {
+  -userModel: Model<User>
+  -jwtService: JwtService
+  --
+  +register(dto: RegisterDto): Promise<AuthResult>
+  +login(dto: LoginDto): Promise<AuthResult>
+  +validateToken(token: string): Promise<User>
+}
+
+class AlertsService {
+  -alertModel: Model<Alert>
+  -userModel: Model<User>
+  -alertsGateway: AlertsGateway
+  --
+  +createAlert(userId, dto): Promise<Alert>
+  +confirmAlert(id, voterId): Promise<Alert>
+  +denyAlert(id, voterId): Promise<Alert>
+  +deleteAlert(id): Promise<void>
+  +getAllAlerts(): Promise<Alert[]>
+  +getAlertsByUserId(userId): Promise<Alert[]>
+  -findDuplicateAlert(): Promise<Alert|null>
+  -calculateConfidenceScore(): Promise<number>
+  -updateAlertState(): Promise<AlertStatus>
+  -updateCreatorTrustScore(): Promise<void>
+}
+
+class UsersService {
+  -userModel: Model<User>
+  --
+  +getUser(id): Promise<User>
+  +updateTrustScore(userId, delta): Promise<void>
+}
+
+class AiService {
+  -httpService: HttpService
+  --
+  +askAI(userId, message): Promise<AiResponse>
+}
+
+class AlertsGateway {
+  -server: Server
+  -jwtService: JwtService
+  --
+  +handleConnection(client): void
+  +handleDisconnect(client): void
+  +emitAlertCreated(alert): Promise<void>
+  +emitAlertConfirmed(alert): Promise<void>
+  +emitAlertDenied(alert): Promise<void>
+  +emitAlertVerified(alert): Promise<void>
+  +emitAlertRejected(alert): Promise<void>
+  +emitAlertDeleted(id): Promise<void>
+  +emitConfidenceUpdated(alert): Promise<void>
+}
+
+class CloudinaryService {
+  --
+  +uploadImage(file): Promise<string>
+  +deleteImage(url): Promise<void>
+}
+
+' Relationships
+User "1" -- "0..*" Alert : creates >
+User "1" -- "0..*" Alert : confirms >
+User "1" -- "0..*" Alert : denies >
+User "1" -- "0..*" ChatMessage : sends >
+
+Alert "1" *-- "1" AlertType
+Alert "1" *-- "1" AlertStatus
+
+ChatMessage "1" *-- "1" MessageRole
+
+AuthService ..> User : manages
+AlertsService ..> Alert : manages
+AlertsService ..> User : updates trust
+AlertsService ..> AlertsGateway : emits events
+AlertsService ..> CloudinaryService : uploads images
+UsersService ..> User : manages
+AiService ..> ChatMessage : stores
+
+@enduml
+
+' ========================================
+@startuml Component_Diagram
+
+title System Architecture - Component Diagram
+
+package "Frontend (Next.js)" {
+  [AlertMap Component]
+  [CreateAlertModal]
+  [AuthModal]
+  [AIPage]
+  [ProfilePage]
+  [Socket.IO Client]
+}
+
+package "Backend (NestJS)" {
+  [AuthController]
+  [AlertsController]
+  [UsersController]
+  [AiController]
+  
+  [AuthService]
+  [AlertsService]
+  [UsersService]
+  
+  [AlertsGateway (WebSocket)]
+  [JwtGuard]
+  [CloudinaryService]
+}
+
+package "AI Service (Python FastAPI)" {
+  [AI Endpoint]
+  [Chat History Manager]
+  [Ollama Client]
+}
+
+database "MongoDB Atlas" {
+  [Users Collection]
+  [Alerts Collection]
+  [ChatMessages Collection]
+}
+
+cloud "External Services" {
+  [Cloudinary API]
+  [Ollama (Llama3)]
+}
+
+' Frontend connections
+[AlertMap Component] --> [AlertsController] : HTTP GET
+[CreateAlertModal] --> [AlertsController] : HTTP POST
+[AuthModal] --> [AuthController] : HTTP POST
+[AIPage] --> [AiController] : HTTP POST
+[ProfilePage] --> [UsersController] : HTTP GET
+[Socket.IO Client] --> [AlertsGateway (WebSocket)] : WebSocket
+
+' Backend internal
+[AuthController] --> [AuthService]
+[AlertsController] --> [AlertsService]
+[UsersController] --> [UsersService]
+[AiController] --> [AI Endpoint] : HTTP Proxy
+
+[AlertsService] --> [AlertsGateway (WebSocket)] : Emit Events
+[AlertsService] --> [CloudinaryService]
+[AlertsService] --> [UsersService]
+
+[JwtGuard] --> [AuthService]
+
+' Backend to Database
+[AuthService] --> [Users Collection]
+[AlertsService] --> [Alerts Collection]
+[UsersService] --> [Users Collection]
+
+' AI Service
+[AI Endpoint] --> [Chat History Manager]
+[Chat History Manager] --> [ChatMessages Collection]
+[AI Endpoint] --> [Ollama Client]
+[Ollama Client] --> [Ollama (Llama3)]
+
+' External services
+[CloudinaryService] --> [Cloudinary API]
+
+@enduml
+
+' ========================================
+@startuml Activity_Duplicate_Detection
+
+title Activity Diagram - Duplicate Alert Detection
+
+start
+
+:User submits alert\n(type, lat, lon);
+
+:Validate coordinates;
+
+:Query recent alerts\n(same type, <10 min);
+
+if (Recent alerts found?) then (yes)
+  
+  while (For each recent alert) is (more alerts)
+    :Calculate distance\n(Haversine formula);
+    
+    if (Distance <= 100m?) then (yes)
+      :Found duplicate!;
+      
+      :Check if user already\nin confirmedBy;
+      
+      if (Already confirmed?) then (yes)
+        :Return existing alert\n(no changes);
+        stop
+      else (no)
+        :Add user to confirmedBy;
+        :Increment confirmations;
+        :Calculate new confidence;
+        
+        if (Confirmations >= 3?) then (yes)
+          :Update status to VERIFIED;
+          :Update creator trust +0.1;
+          :Emit alert_verified;
+        else (no)
+          :Keep status ACTIVE;
+        endif
+        
+        :Emit alert_confirmed;
+        :Emit confidence_updated;
+        :Return updated alert;
+        stop
+      endif
+      
+    else (no)
+      :Continue to next alert;
+    endif
+    
+  endwhile (no more)
+  
+endif
+
+:No duplicate found;
+:Create new alert;
+:Set status = ACTIVE;
+:Set confirmations = 0;
+:Set confidenceScore = 0;
+
+:Emit alert_created;
+
+:Return new alert;
+
+stop
+
+@enduml
+
+@startuml Deployment_Diagram
+
+title Deployment Diagram - Production Environment
+
+node "Client Browser" {
+  [Next.js Frontend]
+  [Socket.IO Client]
+}
+
+node "Vercel / Railway" {
+  [Frontend Server]
+}
+
+node "Railway Server 1" {
+  [NestJS Backend]
+  [Socket.IO Server]
+}
+
+node "Railway Server 2" {
+  [Python AI Service]
+}
+
+cloud "MongoDB Atlas" {
+  database "Production DB" {
+    [Users]
+    [Alerts]
+    [ChatMessages]
+  }
+}
+
+cloud "Cloudinary" {
+  [Image Storage]
+}
+
+cloud "Local/Cloud" {
+  [Ollama Server]
+  [Llama3 8B Model]
+}
+
+[Next.js Frontend] --> [Frontend Server]
+[Next.js Frontend] --> [NestJS Backend] : REST API
+[Socket.IO Client] --> [Socket.IO Server] : WebSocket
+
+[NestJS Backend] --> [Production DB]
+[NestJS Backend] --> [Image Storage]
+[NestJS Backend] --> [Python AI Service]
+
+[Python AI Service] --> [Production DB]
+[Python AI Service] --> [Ollama Server]
+
+@enduml
+
+

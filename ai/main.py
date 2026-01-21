@@ -1,15 +1,19 @@
 from dotenv import load_dotenv
 load_dotenv()
 from datetime import datetime
-from fastapi import FastAPI
+from fastapi import FastAPI,HTTPException
 from pydantic import BaseModel
 import requests
 from models.chat import chat_collection
+import os
 
 
-app = FastAPI()
-
-OLLAMA_URL = "http://localhost:11434/api/generate"
+HF_API_KEY = os.getenv("HF_API_KEY")
+HF_MODEL_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2"
+HEADERS = {
+    "Authorization": f"Bearer {HF_API_KEY}",
+    "Content-Type": "application/json",
+}
 
 SYSTEM_PROMPT = """
 You are an expert AI assistant specialized in vehicle problems and road incidents.
@@ -124,23 +128,40 @@ def build_prompt(user_id: str, user_message: str) -> str:
 
 @app.post("/ask")
 def ask_ai(data: AskRequest):
+    if not HF_API_KEY:
+        raise HTTPException(status_code=500, detail="HF_API_KEY not configured")
+
     prompt = build_prompt(data.userId, data.message)
 
     payload = {
-        "model": "llama3:8b-instruct-q4_K_M",
-        "prompt": prompt,
-        "stream": False
+        "inputs": prompt,
+        "parameters": {
+            "max_new_tokens": 400,
+            "temperature": 0.6,
+            "return_full_text": False
+        }
     }
 
-    response = requests.post(OLLAMA_URL, json=payload)
-    result = response.json()
+    try:
+        response = requests.post(
+            HF_MODEL_URL,
+            headers=HEADERS,
+            json=payload,
+            timeout=60
+        )
+        result = response.json()
 
-    answer = result["response"]
+        # Hugging Face returns a list with generated_text
+        if isinstance(result, list) and "generated_text" in result[0]:
+            answer = result[0]["generated_text"]
+        else:
+            answer = str(result)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
     # Save conversation
     save_message(data.userId, "user", data.message)
     save_message(data.userId, "assistant", answer)
 
-    return {
-        "answer": answer
-    }
+    return {"answer": answer}

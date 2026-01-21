@@ -45,3 +45,6 @@
 - 🔴 **REJECTED** (red) - Confidence ≤ -3, Creator got -0.2 trust
 - ⚪ **EXPIRED** (gray) - Time expired, no trust change
 
+
+
+

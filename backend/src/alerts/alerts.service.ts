@@ -29,23 +29,22 @@ export class AlertsService {
     excludeUserId?: string,
   ): Promise<AlertDocument | null> {
     try {
-      // Time window: last 10 minutes
+     
       const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
 
-      // Find alerts with same type, created in last 10 minutes, and still ACTIVE
+     
       const recentAlerts = await this.alertModel
         .find({
           type: type.toLowerCase(),
-          status: 'ACTIVE', // Only consider active alerts
+          status: 'ACTIVE', 
           createdAt: { $gte: tenMinutesAgo },
-          userId: { $ne: excludeUserId }, // Don't match user's own alerts
+          userId: { $ne: excludeUserId }, 
         })
         .lean()
         .exec();
 
-      // Check distance for each alert (within 100 meters)
-      const maxDistance = 0.1; // 100 meters in kilometers
-
+      
+      const maxDistance = 0.1; 
       for (const alert of recentAlerts) {
         const distance = this.calculateDistanceInKilometers(
           latitude,
@@ -54,12 +53,12 @@ export class AlertsService {
           alert.longitude,
         );
 
-        // Check if within 100 meters (duplicate detection threshold)
+        
         if (distance <= maxDistance) {
           console.log(
             `🔍 [DUPLICATE] Found duplicate alert ${alert._id} at ${distance.toFixed(3)}km distance`,
           );
-          // Return as AlertDocument (need to fetch full document for updates)
+          
           const fullAlert = await this.alertModel.findById(alert._id);
           return fullAlert;
         }
@@ -405,7 +404,7 @@ export class AlertsService {
     try {
       let confidence = 0;
 
-      // Sum trust scores of all confirming users
+      
       for (const userId of alert.confirmedBy || []) {
         try {
           const user = await this.usersService.getUser(userId);
@@ -416,17 +415,16 @@ export class AlertsService {
         }
       }
 
-      // Subtract denials (simple count)
+      
       confidence -= (alert.denials || 0);
 
-      return Math.round(confidence * 10) / 10; // Round to 1 decimal place
+      return Math.round(confidence * 10) / 10; 
     } catch (error) {
       console.error('❌ [CONFIDENCE] Error calculating confidence score:', error);
       return 0;
     }
   }
 
-  // Check and update alert state based on confirmations count
   private async updateAlertState(alertId: string, confidenceScore: number): Promise<'ACTIVE' | 'VERIFIED' | 'REJECTED' | 'EXPIRED'> {
     const alert = await this.alertModel.findById(alertId).lean();
     if (!alert) {
@@ -434,7 +432,6 @@ export class AlertsService {
       return 'ACTIVE';
     }
 
-    // Check if expired first (expired alerts can't change status)
     if (alert.expiresAt && new Date(alert.expiresAt) < new Date()) {
       if (alert.status !== 'EXPIRED') {
         await this.alertModel.findByIdAndUpdate(alertId, { status: 'EXPIRED' });
@@ -442,7 +439,6 @@ export class AlertsService {
       return 'EXPIRED';
     }
 
-    // Don't change status if already in final state (unless expired)
     if (alert.status === 'VERIFIED' || alert.status === 'REJECTED') {
       console.log(`ℹ️ [STATE] Alert ${alertId} already in final state: ${alert.status}`);
       return alert.status as 'VERIFIED' | 'REJECTED';
@@ -450,13 +446,11 @@ export class AlertsService {
 
     let newStatus: 'ACTIVE' | 'VERIFIED' | 'REJECTED' = 'ACTIVE';
 
-    // Simplified: 3 confirmations = VERIFIED
     const confirmationsCount = alert.confirmations || 0;
     const confirmedByCount = Array.isArray(alert.confirmedBy) ? alert.confirmedBy.length : 0;
     
     console.log(`🔍 [STATE] Alert ${alertId} - confirmations: ${confirmationsCount}, confirmedBy: ${confirmedByCount}, current status: ${alert.status}`);
     
-    // Use confirmedBy length if confirmations count seems wrong
     const actualConfirmations = confirmationsCount > 0 ? confirmationsCount : confirmedByCount;
     
     if (actualConfirmations >= 3) {
@@ -482,7 +476,7 @@ export class AlertsService {
     return newStatus;
   }
 
-  // Update creator's trust score when alert reaches final state
+  
   private async updateCreatorTrustScore(alert: any, finalStatus: 'VERIFIED' | 'REJECTED' | 'EXPIRED'): Promise<void> {
     try {
       if (!alert.userId) return;
@@ -497,16 +491,16 @@ export class AlertsService {
         newTrustScore -= 0.2;
         console.log(`📉 [TRUST] User ${alert.userId} trust decreased: ${user.trustScore} → ${newTrustScore}`);
       }
-      // EXPIRED: no change to trust score
+      
 
-      // Clamp between 0.1 and 5.0
+     
       newTrustScore = Math.max(0.1, Math.min(5.0, newTrustScore));
 
-      // Update user trust score
+      
       await this.userModel.findByIdAndUpdate(alert.userId, { trustScore: newTrustScore });
     } catch (error) {
-      console.error('❌ [TRUST] Error updating creator trust score:', error);
-      // Don't throw - trust update failure shouldn't break the flow
+      console.error('[TRUST] Error updating creator trust score:', error);
+      
     }
   }
 

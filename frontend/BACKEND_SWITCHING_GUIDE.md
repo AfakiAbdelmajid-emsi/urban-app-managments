@@ -145,3 +145,6 @@ When deploying to production (Vercel, Railway, etc.), set the environment variab
 - Make sure your backend CORS settings allow your frontend URL
 - Check `backend/src/main.ts` CORS configuration
 
+
+
+
